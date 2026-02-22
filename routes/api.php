@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\PaymentController;
 
 // Public auth routes
 Route::prefix('auth')->group(function () {
@@ -9,8 +10,14 @@ Route::prefix('auth')->group(function () {
     Route::post('/login',    [AuthController::class, 'login']);
 });
 
+Route::post('/payments/checkout-session', [PaymentController::class, 'createCheckoutSession']);
+Route::get('/payments/checkout-session/{checkoutId}', [PaymentController::class, 'verifyCheckoutSession']);
+
+
 // Protected routes (requires Sanctum token)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me',      [AuthController::class, 'me']);
 });
+
+
