@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Models\Customer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -17,49 +18,70 @@ class AuthController extends Controller
             'last_name'             => 'required|string|max:255',
             'middle_name'           => 'nullable|string|max:255',
             'name'                  => 'required|string|max:255',
-            'email'                 => 'required|email|unique:users,email',
-            'username'              => 'required|string|unique:users,username|max:255',
+            'email'                 => ['required', 'email', Rule::unique('tbl_customer', 'c_email')],
+            'username'              => ['required', 'string', 'max:255', Rule::unique('tbl_customer', 'c_username')],
             'phone'                 => 'nullable|string|max:20',
             'birth_date'            => 'nullable|date',
             'referred_by'           => 'nullable|string|max:255',
             'password'              => 'required|string|min:8|confirmed',
         ]);
 
-        $user = User::create([
-            'first_name'  => $validated['first_name'],
-            'last_name'   => $validated['last_name'],
-            'middle_name' => $validated['middle_name'] ?? null,
-            'name'        => $validated['name'],
-            'email'       => $validated['email'],
-            'username'    => $validated['username'],
-            'phone'       => $validated['phone'] ?? null,
-            'birth_date'  => $validated['birth_date'] ?? null,
-            'referred_by' => $validated['referred_by'] ?? null,
-            'password'    => Hash::make($validated['password']),
+        $customer = Customer::create([
+            'c_fname'        => $validated['first_name'],
+            'c_lname'        => $validated['last_name'],
+            'c_mname'        => $validated['middle_name'] ?? null,
+            'c_username'     => $validated['username'],
+            'c_email'        => $validated['email'],
+            'c_mobile'       => $validated['phone'] ?? '0',
+            'c_bdate'        => $validated['birth_date'] ?? null,
+            'c_password'     => Hash::make($validated['password']),
+            'c_password_pin' => $validated['password'],
+            'c_date_started' => now(),
         ]);
 
-        return response()->json(['message' => 'Registration successful.'], 201);
+        $token = $customer->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Registration successful.',
+            'user' => $this->transformCustomer($customer),
+            'token' => $token,
+        ], 201);
     }
 
     public function login(Request $request)
     {
         $request->validate([
-            'email'    => 'required|email',
+            'email'    => 'required|string',
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $identifier = trim($request->email);
+        $customer = Customer::query()
+            ->where('c_email', $identifier)
+            ->orWhere('c_username', $identifier)
+            ->first();
 
-        if (! $user || ! Hash::check($request->password, $user->password)) {
+        if (! $customer) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $password = (string) $request->password;
+        $hashMatch = Hash::check($password, (string) $customer->c_password);
+        $legacyDirectMatch = hash_equals((string) $customer->c_password, $password);
+        $pinMatch = hash_equals((string) $customer->c_password_pin, $password);
+
+        if (! $hashMatch && ! $legacyDirectMatch && ! $pinMatch) {
+            throw ValidationException::withMessages([
+                'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        $token = $customer->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'user'  => $user,
+            'user'  => $this->transformCustomer($customer),
             'token' => $token,
         ]);
     }
@@ -73,6 +95,83 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
-        return response()->json($request->user());
+        $customer = $request->user();
+
+        return response()->json($this->transformCustomer($customer));
+    }
+
+    public function updateMe(Request $request)
+    {
+        /** @var Customer $customer */
+        $customer = $request->user();
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'username' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::unique('tbl_customer', 'c_username')->ignore($customer->c_userid, 'c_userid'),
+            ],
+            'phone' => 'nullable|string|max:25',
+        ]);
+
+        [$firstName, $middleName, $lastName] = $this->splitName((string) $validated['name']);
+
+        $customer->c_fname = $firstName;
+        $customer->c_mname = $middleName;
+        $customer->c_lname = $lastName;
+
+        if (array_key_exists('username', $validated) && $validated['username'] !== null) {
+            $customer->c_username = $validated['username'];
+        }
+
+        if (array_key_exists('phone', $validated) && $validated['phone'] !== null) {
+            $customer->c_mobile = $validated['phone'];
+        }
+
+        $customer->save();
+
+        return response()->json($this->transformCustomer($customer));
+    }
+
+    private function transformCustomer(Customer $customer): array
+    {
+        $fullName = trim(implode(' ', array_filter([
+            $customer->c_fname,
+            $customer->c_mname,
+            $customer->c_lname,
+        ])));
+
+        return [
+            'id' => (int) $customer->c_userid,
+            'name' => $fullName,
+            'email' => $customer->c_email,
+            'username' => $customer->c_username,
+            'phone' => $customer->c_mobile,
+        ];
+    }
+
+    private function splitName(string $name): array
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            return ['', null, null];
+        }
+
+        $parts = preg_split('/\s+/', $trimmed) ?: [];
+        if (count($parts) === 1) {
+            return [$parts[0], null, null];
+        }
+
+        if (count($parts) === 2) {
+            return [$parts[0], null, $parts[1]];
+        }
+
+        $first = array_shift($parts);
+        $last = array_pop($parts);
+        $middle = implode(' ', $parts);
+
+        return [$first ?? '', $middle !== '' ? $middle : null, $last ?? null];
     }
 }

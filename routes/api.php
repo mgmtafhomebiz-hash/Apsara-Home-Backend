@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\MemberController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PaymentController;
 
@@ -18,6 +19,6 @@ Route::get('/payments/checkout-session/{checkoutId}', [PaymentController::class,
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me',      [AuthController::class, 'me']);
+    Route::put('/auth/me',      [AuthController::class, 'updateMe']);
+    Route::get('/admin/members', [MemberController::class, 'index']);
 });
-
-
