@@ -21,4 +21,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me',      [AuthController::class, 'me']);
     Route::put('/auth/me',      [AuthController::class, 'updateMe']);
     Route::get('/admin/members', [MemberController::class, 'index']);
+    Route::get('/admin/members/stats', [MemberController::class, 'stats']);
 });

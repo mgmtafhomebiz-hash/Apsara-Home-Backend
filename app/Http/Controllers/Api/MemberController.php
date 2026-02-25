@@ -18,11 +18,6 @@ class MemberController extends Controller
         $status = trim((string) $request->query('status', ''));
         $tier = trim((string) $request->query('tier', ''));
 
-        $referralCounts = Customer::query()
-            ->selectRaw('c_sponsor, COUNT(*) as total')
-            ->groupBy('c_sponsor')
-            ->pluck('total', 'c_sponsor');
-
         $paginator = Customer::query()
             ->select([
                 'c_userid',
@@ -98,6 +93,14 @@ class MemberController extends Controller
             ->orderByDesc('c_userid')
             ->paginate($perPage);
 
+        $pageUserIds = collect($paginator->items())->pluck('c_userid')->all();
+
+        $referralCounts = Customer::query()
+            ->selectRaw('c_sponsor, COUNT(*) as total')
+            ->whereIn('c_sponsor', $pageUserIds)
+            ->groupBy('c_sponsor')
+            ->pluck('total', 'c_sponsor');
+
         $members = collect($paginator->items())
             ->map(function (Customer $customer) use ($referralCounts): array {
                 $fullName = trim(implode(' ', array_filter([
@@ -146,6 +149,29 @@ class MemberController extends Controller
                 'from' => $paginator->firstItem(),
                 'to' => $paginator->lastItem(),
             ],
+        ]);
+    }
+
+    public function stats(): JsonResponse
+    {
+        $total = Customer::count();
+        $active = Customer::where('c_lockstatus', 0)->where('c_accnt_status', 1)->count();
+        $pending = Customer::where('c_lockstatus', 0)->whereIn('c_accnt_status', [0, 2])->count();
+        $blocked = Customer::where('c_lockstatus', 1)->count();
+        $totalSpent = (float) Customer::sum('c_gpv');
+        $totalEarnings = (float) Customer::sum('c_totalincome');
+        $totalReferrals = Customer::whereNotNull('c_sponsor')
+            ->where('c_sponsor', '!=', 0)
+            ->count();
+
+        return response()->json([
+            'total' => $total,
+            'active' => $active,
+            'pending' => $pending,
+            'blocked' => $blocked,
+            'totalSpent' => $totalSpent,
+            'totalEarnings' => $totalEarnings,
+            'totalReferrals' => $totalReferrals,
         ]);
     }
 
