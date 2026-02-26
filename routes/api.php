@@ -2,8 +2,11 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\MemberController;
+use App\Http\Controllers\Api\ProductController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\AdminAuthController;
+
 
 // Public auth routes
 Route::prefix('auth')->group(function () {
@@ -22,4 +25,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/auth/me',      [AuthController::class, 'updateMe']);
     Route::get('/admin/members', [MemberController::class, 'index']);
     Route::get('/admin/members/stats', [MemberController::class, 'stats']);
+    Route::get('/admin/products', [ProductController::class, 'index']);
+    Route::post('/admin/products', [ProductController::class, 'store']);
+    Route::put('/admin/products/{id}', [ProductController::class, 'update']);
+    Route::delete('/admin/products/{id}', [ProductController::class, 'destroy']);
+});
+
+Route::prefix('admin/auth')->group(function () {
+    Route::post('/login', [AdminAuthController::class, 'login']);
+});
+
+Route::middleware('auth:sanctum')->prefix('admin/auth')->group(function () {
+    Route::post('/logout', [AdminAuthController::class, 'logout']);
+    Route::get('/me', [AdminAuthController::class, 'me']);
 });

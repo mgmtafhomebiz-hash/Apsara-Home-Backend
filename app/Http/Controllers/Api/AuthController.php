@@ -24,6 +24,12 @@ class AuthController extends Controller
             'birth_date'            => 'nullable|date',
             'referred_by'           => 'nullable|string|max:255',
             'password'              => 'required|string|min:8|confirmed',
+            'address'               => 'nullable|string|max:500',
+            'barangay'              => 'nullable|string|max:255',
+            'city'                  => 'nullable|string|max:255',
+            'province'              => 'nullable|string|max:255',
+            'region'                => 'nullable|string|max:255',
+            'zip_code'              => 'nullable|string|max:20',
         ]);
 
         $customer = Customer::create([
@@ -37,6 +43,12 @@ class AuthController extends Controller
             'c_password'     => Hash::make($validated['password']),
             'c_password_pin' => $validated['password'],
             'c_date_started' => now(),
+            'c_address'      => $validated['address'] ?? null,
+            'c_barangay'     => $validated['barangay'] ?? null,
+            'c_city'         => $validated['city'] ?? null,
+            'c_province'     => $validated['province'] ?? null,
+            'c_region'       => $validated['region'] ?? null,
+            'c_zipcode'      => $validated['zip_code'] ?? null,
         ]);
 
         $token = $customer->createToken('auth_token')->plainTextToken;
@@ -174,4 +186,16 @@ class AuthController extends Controller
 
         return [$first ?? '', $middle !== '' ? $middle : null, $last ?? null];
     }
+
+    private function mapRole(int $level): string
+    {
+    return match ($level) {
+            1 => 'super_admin',
+            2 => 'admin',
+            3 => 'csr',
+            4 => 'web_content',
+            default => 'staff',
+    } ;
+}
+
 }
