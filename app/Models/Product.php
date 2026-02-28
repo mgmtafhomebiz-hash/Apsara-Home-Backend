@@ -57,4 +57,16 @@ class Product extends Model
         'pd_date'        => 'datetime',
         'pd_last_update' => 'datetime',
     ];
+
+    public function photos()
+    {
+        return $this->hasMany(ProductPhoto::class, 'pp_pdid', 'pd_id')
+            ->orderBy('pp_id');
+    }
+
+    public function variants()
+    {
+        return $this->hasMany(ProductVariant::class, 'pv_pdid', 'pd_id')
+            ->orderBy('pv_id');
+    }
 }
