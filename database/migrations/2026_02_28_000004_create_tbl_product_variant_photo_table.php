@@ -8,6 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (!Schema::hasTable('tbl_product_variant')) {
+            return;
+        }
+
+        if (Schema::hasTable('tbl_product_variant_photo')) {
+            return;
+        }
+
         Schema::create('tbl_product_variant_photo', function (Blueprint $table) {
             $table->bigIncrements('pvp_id');
             $table->unsignedBigInteger('pvp_pvid');
@@ -25,7 +33,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (!Schema::hasTable('tbl_product_variant_photo')) {
+            return;
+        }
+
         Schema::dropIfExists('tbl_product_variant_photo');
     }
 };
-

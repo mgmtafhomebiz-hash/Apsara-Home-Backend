@@ -8,6 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (!Schema::hasTable('tbl_product')) {
+            return;
+        }
+
+        if (Schema::hasTable('tbl_product_photo')) {
+            return;
+        }
+
         Schema::create('tbl_product_photo', function (Blueprint $table) {
             $table->bigIncrements('pp_id');
             $table->unsignedBigInteger('pp_pdid');
@@ -25,7 +33,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (!Schema::hasTable('tbl_product_photo')) {
+            return;
+        }
+
         Schema::dropIfExists('tbl_product_photo');
     }
 };
-

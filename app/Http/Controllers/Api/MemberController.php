@@ -27,7 +27,7 @@ class MemberController extends Controller
             'tier' => $tier,
         ]));
 
-        $payload = Cache::remember($cacheKey, now()->addSeconds(20), function () use ($perPage, $search, $status, $tier) {
+        $payload = Cache::remember($cacheKey, now()->addMinutes(2), function () use ($perPage, $search, $status, $tier) {
             $paginator = Customer::query()
                 ->select([
                     'c_userid',
@@ -168,7 +168,7 @@ class MemberController extends Controller
 
     public function stats(): JsonResponse
     {
-        $payload = Cache::remember('admin:members:stats', now()->addSeconds(30), function () {
+        $payload = Cache::remember('admin:members:stats', now()->addMinutes(2), function () {
             $total = Customer::count();
             $active = Customer::where('c_lockstatus', 0)->where('c_accnt_status', 1)->count();
             $pending = Customer::where('c_lockstatus', 0)->whereIn('c_accnt_status', [0, 2])->count();

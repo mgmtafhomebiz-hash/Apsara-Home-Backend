@@ -2,11 +2,16 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
+        if (!Schema::hasTable('tbl_customer')) {
+            return;
+        }
+
         // Speeds up ILIKE '%term%' searches for members list.
         DB::statement('CREATE EXTENSION IF NOT EXISTS pg_trgm');
 
@@ -28,6 +33,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (!Schema::hasTable('tbl_customer')) {
+            return;
+        }
+
         DB::statement('DROP INDEX IF EXISTS idx_tbl_customer_fullname_trgm');
         DB::statement('DROP INDEX IF EXISTS idx_tbl_customer_lname_trgm');
         DB::statement('DROP INDEX IF EXISTS idx_tbl_customer_mname_trgm');
