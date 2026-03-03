@@ -81,22 +81,27 @@ class MemberController extends Controller
                     }
                 })
                 ->when($tier !== '', function ($query) use ($tier) {
-                    if ($tier === 'Platinum') {
-                        $query->where('c_rank', '>=', 4);
+                    if ($tier === 'Lifestyle Elite') {
+                        $query->where('c_rank', '>=', 5);
                         return;
                     }
 
-                    if ($tier === 'Gold') {
+                    if ($tier === 'Lifestyle Consultant') {
+                        $query->where('c_rank', 4);
+                        return;
+                    }
+
+                    if ($tier === 'Home Stylist') {
                         $query->where('c_rank', 3);
                         return;
                     }
 
-                    if ($tier === 'Silver') {
+                    if ($tier === 'Home Builder') {
                         $query->where('c_rank', 2);
                         return;
                     }
 
-                    if ($tier === 'Bronze') {
+                    if ($tier === 'Home Starter') {
                         $query->where('c_rank', '<=', 1);
                     }
                 })
@@ -208,19 +213,23 @@ class MemberController extends Controller
 
     private function mapTier(int $rank): string
     {
+        if ($rank >= 5) {
+            return 'Lifestyle Elite';
+        }
+
         if ($rank >= 4) {
-            return 'Platinum';
+            return 'Lifestyle Consultant';
         }
 
         if ($rank >= 3) {
-            return 'Gold';
+            return 'Home Stylist';
         }
 
         if ($rank >= 2) {
-            return 'Silver';
+            return 'Home Builder';
         }
 
-        return 'Bronze';
+        return 'Home Starter';
     }
 
     private function formatDate(?string $value): string

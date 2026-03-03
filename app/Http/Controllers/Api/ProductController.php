@@ -129,6 +129,7 @@ class ProductController extends Controller
             'catsubid'    => (int)   $p->pd_catsubid,
             'priceSrp'    => $this->toNumber($p->pd_price_srp),
             'priceDp'     => $this->toNumber($p->pd_price_dp),
+            'prodpv'      => $this->toNumber($p->pd_prodpv),
             'qty'         => $this->toNumber($p->pd_qty),
             'weight'      => (int)   $p->pd_weight,
             'type'        => (int)   $p->pd_type,
@@ -158,6 +159,7 @@ class ProductController extends Controller
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_catid', 'pd_catsubid',
                 'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_prodpv',
                 'pd_weight', 'pd_type', 'pd_musthave',
                 'pd_bestseller', 'pd_salespromo', 'pd_status', 'pd_date',
                 'pd_last_update', 'pd_parent_sku', 'pd_image',
@@ -191,6 +193,7 @@ class ProductController extends Controller
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_catid', 'pd_catsubid',
                 'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_prodpv',
                 'pd_weight', 'pd_type', 'pd_musthave',
                 'pd_bestseller', 'pd_salespromo', 'pd_status', 'pd_date',
                 'pd_last_update', 'pd_parent_sku', 'pd_image',
@@ -239,6 +242,7 @@ class ProductController extends Controller
             'pd_catsubid'  => 'nullable|integer',
             'pd_price_srp' => 'required|numeric|min:0',
             'pd_price_dp'  => 'nullable|numeric|min:0',
+            'pd_prodpv'    => 'nullable|numeric|min:0',
             'pd_qty'       => 'nullable|numeric|min:0',
             'pd_weight'    => 'nullable|integer|min:0',
             'pd_psweight'  => 'nullable|numeric|min:0',
@@ -293,6 +297,7 @@ class ProductController extends Controller
                 'pd_supplier'    => 0,
                 'pd_price_srp'   => $request->pd_price_srp ?? 0,
                 'pd_price_dp'    => $request->pd_price_dp ?? 0,
+                'pd_prodpv'      => $request->pd_prodpv ?? 0,
                 'pd_qty'         => $request->pd_qty ?? 0,
                 'pd_weight'      => $request->pd_weight ?? 0,
                 'pd_psweight'    => $request->pd_psweight ?? 0,
@@ -334,6 +339,7 @@ class ProductController extends Controller
                 'id'       => $product->pd_id,
                 'name'     => $product->pd_name,
                 'priceSrp' => (float) $product->pd_price_srp,
+                'prodpv'   => (float) ($product->pd_prodpv ?? 0),
                 'status'   => (int) $product->pd_status,
             ],
         ], 201);
@@ -352,6 +358,7 @@ class ProductController extends Controller
             'pd_catsubid'    => 'nullable|integer',
             'pd_price_srp'   => 'sometimes|required|numeric|min:0',
             'pd_price_dp'    => 'nullable|numeric|min:0',
+            'pd_prodpv'      => 'nullable|numeric|min:0',
             'pd_qty'         => 'nullable|numeric|min:0',
             'pd_weight'      => 'nullable|integer|min:0',
             'pd_psweight'    => 'nullable|numeric|min:0',
@@ -386,7 +393,7 @@ class ProductController extends Controller
 
         $fields = [
             'pd_name', 'pd_catid', 'pd_catsubid', 'pd_description',
-            'pd_price_srp', 'pd_price_dp', 'pd_qty', 'pd_weight',
+            'pd_price_srp', 'pd_price_dp', 'pd_prodpv', 'pd_qty', 'pd_weight',
             'pd_psweight', 'pd_pslenght', 'pd_psheight',
             'pd_parent_sku', 'pd_type', 'pd_status', 'pd_image',
         ];

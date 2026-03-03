@@ -91,6 +91,8 @@ class AdminAuthController extends Controller
             2 => 'admin',
             3 => 'csr',
             4 => 'web_content',
+            5 => 'accounting',
+            6 => 'finance_officer',
             default => 'staff',
         };
     }

@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\AdminOrderController;
+use App\Http\Controllers\Api\EncashmentController;
+use App\Http\Controllers\Api\AdminEncashmentController;
+use App\Http\Controllers\Api\AdminUserController;
 
 
 // Public auth routes
@@ -39,10 +42,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/admin/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/admin/categories/{id}', [CategoryController::class, 'destroy']);
     Route::get('/orders/history', [PaymentController::class, 'checkoutHistory']);
+    Route::post('/encashment/requests', [EncashmentController::class, 'store']);
+    Route::get('/encashment/requests', [EncashmentController::class, 'myRequests']);
+    Route::get('/encashment/wallet', [EncashmentController::class, 'walletOverview']);
     Route::get('/admin/orders', [AdminOrderController::class, 'index']);
     Route::patch('/admin/orders/{id}/approve', [AdminOrderController::class, 'approve']);
     Route::patch('/admin/orders/{id}/reject', [AdminOrderController::class, 'reject']);
     Route::patch('/admin/orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
+    Route::get('/admin/encashment', [AdminEncashmentController::class, 'index']);
+    Route::patch('/admin/encashment/{id}/approve', [AdminEncashmentController::class, 'approve']);
+    Route::patch('/admin/encashment/{id}/reject', [AdminEncashmentController::class, 'reject']);
+    Route::patch('/admin/encashment/{id}/release', [AdminEncashmentController::class, 'release']);
+    Route::get('/admin/users', [AdminUserController::class, 'index']);
+    Route::post('/admin/users', [AdminUserController::class, 'store']);
+    Route::put('/admin/users/{id}', [AdminUserController::class, 'update']);
+    Route::delete('/admin/users/{id}', [AdminUserController::class, 'destroy']);
 });
 
 Route::prefix('admin/auth')->group(function () {

@@ -24,6 +24,11 @@ class CheckoutHistory extends Model
         'ch_payment_method',
         'ch_quantity',
         'ch_product_name',
+        'ch_product_id',
+        'ch_product_sku',
+        'ch_product_pv',
+        'ch_earned_pv',
+        'ch_pv_posted_at',
         'ch_product_image',
         'ch_selected_color',
         'ch_selected_size',
@@ -38,7 +43,10 @@ class CheckoutHistory extends Model
     protected $casts = [
         'ch_amount' => 'float',
         'ch_quantity' => 'integer',
+        'ch_product_pv' => 'float',
+        'ch_earned_pv' => 'float',
         'ch_paid_at' => 'datetime',
         'ch_approved_at' => 'datetime',
+        'ch_pv_posted_at' => 'datetime',
     ];
 }
