@@ -133,6 +133,7 @@ class AuthController extends Controller
                 Rule::unique('tbl_customer', 'c_username')->ignore($customer->c_userid, 'c_userid'),
             ],
             'phone' => 'nullable|string|max:25',
+            'avatar_url' => 'nullable|url|max:1200',
         ]);
 
         [$firstName, $middleName, $lastName] = $this->splitName((string) $validated['name']);
@@ -149,6 +150,10 @@ class AuthController extends Controller
             $customer->c_mobile = $validated['phone'];
         }
 
+        if (array_key_exists('avatar_url', $validated)) {
+            $customer->c_avatar_url = $validated['avatar_url'] ?: null;
+        }
+
         $customer->save();
 
         return response()->json($this->transformCustomer($customer));
@@ -162,12 +167,26 @@ class AuthController extends Controller
             $customer->c_lname,
         ])));
 
+        $accountStatus = (int) ($customer->c_accnt_status ?? 0);
+        $lockStatus = (int) ($customer->c_lockstatus ?? 0);
+        $verificationStatus = $lockStatus === 1
+            ? 'blocked'
+            : match ($accountStatus) {
+                1 => 'verified',
+                2 => 'pending_review',
+                default => 'not_verified',
+            };
+
         return [
             'id' => (int) $customer->c_userid,
             'name' => $fullName,
             'email' => $customer->c_email,
             'username' => $customer->c_username,
             'phone' => $customer->c_mobile,
+            'avatar_url' => $customer->c_avatar_url,
+            'account_status' => $accountStatus,
+            'lock_status' => $lockStatus,
+            'verification_status' => $verificationStatus,
         ];
     }
 

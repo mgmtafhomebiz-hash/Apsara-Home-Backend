@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\AdminOrderController;
 use App\Http\Controllers\Api\EncashmentController;
 use App\Http\Controllers\Api\AdminEncashmentController;
 use App\Http\Controllers\Api\AdminUserController;
+use App\Http\Controllers\Api\AdminMemberKycController;
 
 
 // Public auth routes
@@ -45,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/encashment/requests', [EncashmentController::class, 'store']);
     Route::get('/encashment/requests', [EncashmentController::class, 'myRequests']);
     Route::get('/encashment/wallet', [EncashmentController::class, 'walletOverview']);
+    Route::post('/encashment/verification-request', [EncashmentController::class, 'submitVerificationRequest']);
     Route::get('/admin/orders', [AdminOrderController::class, 'index']);
     Route::patch('/admin/orders/{id}/approve', [AdminOrderController::class, 'approve']);
     Route::patch('/admin/orders/{id}/reject', [AdminOrderController::class, 'reject']);
@@ -57,6 +59,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/admin/users', [AdminUserController::class, 'store']);
     Route::put('/admin/users/{id}', [AdminUserController::class, 'update']);
     Route::delete('/admin/users/{id}', [AdminUserController::class, 'destroy']);
+    Route::get('/admin/members/kyc', [AdminMemberKycController::class, 'index']);
+    Route::patch('/admin/members/kyc/{id}/approve', [AdminMemberKycController::class, 'approve']);
+    Route::patch('/admin/members/kyc/{id}/reject', [AdminMemberKycController::class, 'reject']);
 });
 
 Route::prefix('admin/auth')->group(function () {

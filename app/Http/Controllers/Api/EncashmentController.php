@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerVerificationRequest;
 use App\Models\CustomerWalletLedger;
 use App\Models\EncashmentRequest;
 use Illuminate\Http\Request;
@@ -191,7 +192,153 @@ class EncashmentController extends Controller
             ],
             'eligibility' => $this->evaluateEligibility($customer, $rules),
             'policy' => $this->policyMeta($rules),
+            'verification' => $this->verificationMeta($customer),
         ]);
+    }
+
+    public function submitVerificationRequest(Request $request)
+    {
+        $customer = $request->user();
+        if (!$customer instanceof Customer) {
+            return response()->json(['message' => 'Only customer accounts can submit verification requests.'], 403);
+        }
+
+        if ((int) ($customer->c_lockstatus ?? 0) === 1) {
+            return response()->json([
+                'message' => 'Your account is currently blocked. Please contact support for verification assistance.',
+            ], 422);
+        }
+
+        if ((int) ($customer->c_accnt_status ?? 0) === 1) {
+            return response()->json([
+                'message' => 'Your account is already verified and active.',
+                'status' => 'verified',
+                'approval_owner' => 'admin',
+            ]);
+        }
+
+        $existingPending = CustomerVerificationRequest::query()
+            ->where('cvr_customer_id', (int) $customer->c_userid)
+            ->whereIn('cvr_status', ['pending_review', 'for_review', 'on_hold'])
+            ->latest('cvr_id')
+            ->first();
+        if ($existingPending) {
+            return response()->json([
+                'message' => 'You already have a pending verification request. Please wait for admin review.',
+                'status' => 'pending_review',
+                'approval_owner' => 'admin',
+                'reference_no' => $existingPending->cvr_reference_no,
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'full_name' => 'required|string|min:3|max:255',
+            'birth_date' => 'nullable|date',
+            'id_type' => 'required|string|max:60',
+            'id_number' => 'nullable|string|max:120',
+            'contact_number' => 'nullable|string|max:60',
+            'address_line' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:120',
+            'province' => 'nullable|string|max:120',
+            'postal_code' => 'nullable|string|max:20',
+            'country' => 'nullable|string|max:80',
+            'notes' => 'nullable|string|max:1000',
+            'id_front_url' => 'required|url|max:1200',
+            'id_back_url' => 'nullable|url|max:1200',
+            'selfie_url' => 'required|url|max:1200',
+            'profile_photo_url' => 'nullable|url|max:1200',
+        ]);
+
+        $referenceNo = $this->generateVerificationReferenceNo();
+        CustomerVerificationRequest::create([
+            'cvr_customer_id' => (int) $customer->c_userid,
+            'cvr_reference_no' => $referenceNo,
+            'cvr_status' => 'pending_review',
+            'cvr_full_name' => $validated['full_name'],
+            'cvr_birth_date' => $validated['birth_date'] ?? null,
+            'cvr_id_type' => $validated['id_type'],
+            'cvr_id_number' => $validated['id_number'] ?? null,
+            'cvr_contact_number' => $validated['contact_number'] ?? null,
+            'cvr_address_line' => $validated['address_line'] ?? null,
+            'cvr_city' => $validated['city'] ?? null,
+            'cvr_province' => $validated['province'] ?? null,
+            'cvr_postal_code' => $validated['postal_code'] ?? null,
+            'cvr_country' => $validated['country'] ?? 'Philippines',
+            'cvr_notes' => $validated['notes'] ?? null,
+            'cvr_id_front_url' => $validated['id_front_url'],
+            'cvr_id_back_url' => $validated['id_back_url'] ?? null,
+            'cvr_selfie_url' => $validated['selfie_url'],
+            'cvr_profile_photo_url' => $validated['profile_photo_url'] ?? ($customer->c_avatar_url ?? null),
+        ]);
+
+        if ((int) ($customer->c_accnt_status ?? 0) !== 2) {
+            $customer->c_accnt_status = 2; // KYC/verification review queue
+            $customer->save();
+        }
+
+        return response()->json([
+            'message' => 'Verification request submitted. Please wait for admin approval.',
+            'status' => 'pending_review',
+            'approval_owner' => 'admin',
+            'reference_no' => $referenceNo,
+            'verification' => $this->verificationMeta($customer->fresh()),
+        ]);
+    }
+
+    private function verificationMeta(Customer $customer): array
+    {
+        if ((int) ($customer->c_lockstatus ?? 0) === 1) {
+            return [
+                'status' => 'blocked',
+                'reference_no' => null,
+                'submitted_at' => null,
+            ];
+        }
+
+        if ((int) ($customer->c_accnt_status ?? 0) === 1) {
+            return [
+                'status' => 'verified',
+                'reference_no' => null,
+                'submitted_at' => null,
+            ];
+        }
+
+        $pending = CustomerVerificationRequest::query()
+            ->where('cvr_customer_id', (int) $customer->c_userid)
+            ->whereIn('cvr_status', ['pending_review', 'for_review', 'on_hold'])
+            ->latest('cvr_id')
+            ->first();
+
+        if ($pending) {
+            return [
+                'status' => 'pending_review',
+                'reference_no' => $pending->cvr_reference_no,
+                'submitted_at' => optional($pending->created_at)->toDateTimeString(),
+            ];
+        }
+
+        return [
+            'status' => ((int) ($customer->c_accnt_status ?? 0) === 2) ? 'pending_review' : 'not_submitted',
+            'reference_no' => null,
+            'submitted_at' => null,
+        ];
+    }
+
+    private function generateVerificationReferenceNo(): string
+    {
+        $date = now()->format('Ymd');
+
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $count = CustomerVerificationRequest::query()
+                ->whereDate('created_at', now()->toDateString())
+                ->count() + 1 + $attempt;
+            $candidate = sprintf('KYC-%s-%04d', $date, $count);
+            if (!CustomerVerificationRequest::query()->where('cvr_reference_no', $candidate)->exists()) {
+                return $candidate;
+            }
+        }
+
+        return sprintf('KYC-%s-%s', $date, strtoupper(substr(md5((string) microtime(true)), 0, 6)));
     }
 
     private function transform(EncashmentRequest $row, Customer $customer): array
@@ -212,6 +359,8 @@ class EncashmentController extends Controller
             'account_number' => $row->er_account_number,
             'notes' => $row->er_notes,
             'status' => $row->er_status,
+            'proof_url' => $row->er_proof_url,
+            'proof_uploaded_at' => optional($row->er_proof_uploaded_at)->toDateTimeString(),
             'affiliate_name' => $name !== '' ? $name : ($customer->c_username ?? 'Affiliate'),
             'affiliate_email' => $customer->c_email ?? null,
             'approved_at' => optional($row->er_approved_at)->toDateTimeString(),

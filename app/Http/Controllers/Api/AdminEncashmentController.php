@@ -32,7 +32,7 @@ class AdminEncashmentController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 20);
 
         $query = EncashmentRequest::query()
-            ->with(['customer:c_userid,c_username,c_email,c_fname,c_mname,c_lname'])
+            ->with(['customer:c_userid,c_username,c_email,c_fname,c_mname,c_lname,c_totalincome'])
             ->when($search !== '', function ($builder) use ($search) {
                 $builder->where(function ($q) use ($search) {
                     $q->where('er_reference_no', 'like', "%{$search}%")
@@ -48,8 +48,27 @@ class AdminEncashmentController extends Controller
             ->orderByDesc('created_at')
             ->paginate($perPage);
 
+        $customerIds = collect($rows->items())
+            ->map(fn (EncashmentRequest $row) => (int) $row->er_customer_id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $lockedByCustomer = [];
+        if (!empty($customerIds)) {
+            $lockedByCustomer = EncashmentRequest::query()
+                ->selectRaw('er_customer_id, COALESCE(SUM(er_amount), 0) as total_locked')
+                ->whereIn('er_customer_id', $customerIds)
+                ->whereIn('er_status', ['pending', 'approved_by_admin', 'on_hold'])
+                ->groupBy('er_customer_id')
+                ->pluck('total_locked', 'er_customer_id')
+                ->map(fn ($amount) => (float) $amount)
+                ->all();
+        }
+
         return response()->json([
-            'requests' => collect($rows->items())->map(fn (EncashmentRequest $row) => $this->transform($row))->values(),
+            'requests' => collect($rows->items())->map(fn (EncashmentRequest $row) => $this->transform($row, $lockedByCustomer))->values(),
             'meta' => [
                 'current_page' => $rows->currentPage(),
                 'last_page' => $rows->lastPage(),
@@ -130,6 +149,8 @@ class AdminEncashmentController extends Controller
 
         $validated = $request->validate([
             'notes' => 'required|string|min:5|max:1000',
+            'proof_url' => 'required|url|max:1200',
+            'proof_public_id' => 'nullable|string|max:255',
         ]);
 
         $row = EncashmentRequest::query()->where('er_id', $id)->firstOrFail();
@@ -183,6 +204,10 @@ class AdminEncashmentController extends Controller
                 'er_status' => 'released',
                 'er_invoice_no' => $lockedRow->er_invoice_no ?: $this->generateInvoiceNo(),
                 'er_accounting_notes' => $validated['notes'],
+                'er_proof_url' => $validated['proof_url'],
+                'er_proof_public_id' => $validated['proof_public_id'] ?? null,
+                'er_proof_uploaded_by' => (int) $admin->id,
+                'er_proof_uploaded_at' => now(),
                 'er_released_by' => (int) $admin->id,
                 'er_released_at' => now(),
             ])->save();
@@ -191,12 +216,16 @@ class AdminEncashmentController extends Controller
         return response()->json(['message' => 'Encashment released successfully.']);
     }
 
-    private function transform(EncashmentRequest $row): array
+    private function transform(EncashmentRequest $row, array $lockedByCustomer = []): array
     {
         $customer = $row->customer;
         $name = $customer
             ? trim(implode(' ', array_filter([$customer->c_fname ?? null, $customer->c_mname ?? null, $customer->c_lname ?? null])))
             : '';
+        $cashBalance = (float) ($customer?->c_totalincome ?? 0);
+        $lockedAmount = (float) ($lockedByCustomer[(int) $row->er_customer_id] ?? 0);
+        $availableAmount = max(0, $cashBalance - $lockedAmount);
+        $shortfall = max(0, (float) $row->er_amount - $cashBalance);
 
         return [
             'id' => (int) $row->er_id,
@@ -212,6 +241,15 @@ class AdminEncashmentController extends Controller
             'status' => $row->er_status,
             'admin_notes' => $row->er_admin_notes,
             'accounting_notes' => $row->er_accounting_notes,
+            'proof_url' => $row->er_proof_url,
+            'proof_public_id' => $row->er_proof_public_id,
+            'proof_uploaded_by' => $row->er_proof_uploaded_by ? (int) $row->er_proof_uploaded_by : null,
+            'proof_uploaded_at' => optional($row->er_proof_uploaded_at)->toDateTimeString(),
+            'wallet_cash_balance' => round($cashBalance, 2),
+            'wallet_locked_amount' => round($lockedAmount, 2),
+            'wallet_available_amount' => round($availableAmount, 2),
+            'can_release_by_balance' => $cashBalance >= (float) $row->er_amount,
+            'balance_shortfall' => round($shortfall, 2),
             'approved_by' => $row->er_approved_by ? (int) $row->er_approved_by : null,
             'approved_at' => optional($row->er_approved_at)->toDateTimeString(),
             'released_by' => $row->er_released_by ? (int) $row->er_released_by : null,

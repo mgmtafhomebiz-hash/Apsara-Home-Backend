@@ -21,6 +21,10 @@ class EncashmentRequest extends Model
         'er_status',
         'er_admin_notes',
         'er_accounting_notes',
+        'er_proof_url',
+        'er_proof_public_id',
+        'er_proof_uploaded_by',
+        'er_proof_uploaded_at',
         'er_approved_by',
         'er_approved_at',
         'er_released_by',
@@ -29,6 +33,7 @@ class EncashmentRequest extends Model
 
     protected $casts = [
         'er_amount' => 'float',
+        'er_proof_uploaded_at' => 'datetime',
         'er_approved_at' => 'datetime',
         'er_released_at' => 'datetime',
     ];
