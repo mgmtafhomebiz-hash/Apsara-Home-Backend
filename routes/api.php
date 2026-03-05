@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\AdminEncashmentController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AdminMemberKycController;
 use App\Http\Controllers\Api\CustomerNotificationController;
+use App\Http\Controllers\Api\WishlistController;
 
 
 // Public auth routes
@@ -25,6 +26,7 @@ Route::post('/payments/checkout-session', [PaymentController::class, 'createChec
 Route::get('/payments/checkout-session/{checkoutId}', [PaymentController::class, 'verifyCheckoutSession']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/products/slug/{slug}', [ProductController::class, 'showBySlug']);
+Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/products', [ProductController::class, 'index']);
 
 
@@ -67,6 +69,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/admin/members/kyc', [AdminMemberKycController::class, 'index']);
     Route::patch('/admin/members/kyc/{id}/approve', [AdminMemberKycController::class, 'approve']);
     Route::patch('/admin/members/kyc/{id}/reject', [AdminMemberKycController::class, 'reject']);
+    Route::get('/wishlist', [WishlistController::class, 'index']);
+    Route::post('/wishlist', [WishlistController::class, 'store']);
+    Route::delete('/wishlist/{productId}', [WishlistController::class, 'destroy']);
 });
 
 Route::prefix('admin/auth')->group(function () {

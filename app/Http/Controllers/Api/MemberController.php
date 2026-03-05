@@ -36,6 +36,7 @@ class MemberController extends Controller
                     'c_mname',
                     'c_lname',
                     'c_email',
+                    'c_avatar_url',
                     'c_lockstatus',
                     'c_accnt_status',
                     'c_rank',
@@ -133,6 +134,10 @@ class MemberController extends Controller
                         (int) $customer->c_lockstatus,
                         (int) $customer->c_accnt_status
                     );
+                    $verificationStatus = $this->mapVerificationStatus(
+                        (int) $customer->c_lockstatus,
+                        (int) $customer->c_accnt_status
+                    );
 
                     $rank = (int) $customer->c_rank;
                     $tier = $this->mapTier($rank);
@@ -143,6 +148,8 @@ class MemberController extends Controller
                         'id' => (int) $customer->c_userid,
                         'name' => $fullName,
                         'email' => (string) ($customer->c_email ?: ''),
+                        'avatar' => (string) ($customer->c_avatar_url ?: ''),
+                        'verificationStatus' => $verificationStatus,
                         'status' => $status,
                         'tier' => $tier,
                         'orders' => (int) $customer->c_totalpair,
@@ -204,11 +211,32 @@ class MemberController extends Controller
             return 'blocked';
         }
 
+        if ($accountStatus === 2) {
+            return 'kyc_review';
+        }
+
         if ($accountStatus === 0) {
             return 'pending';
         }
 
         return 'active';
+    }
+
+    private function mapVerificationStatus(int $lockStatus, int $accountStatus): string
+    {
+        if ($lockStatus === 1) {
+            return 'blocked';
+        }
+
+        if ($accountStatus === 1) {
+            return 'verified';
+        }
+
+        if ($accountStatus === 2) {
+            return 'pending_review';
+        }
+
+        return 'not_verified';
     }
 
     private function mapTier(int $rank): string

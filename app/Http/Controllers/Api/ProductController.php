@@ -183,6 +183,35 @@ class ProductController extends Controller
         ]);
     }
 
+    public function show(int $id): JsonResponse
+    {
+        $product = Product::query()
+            ->select([
+                'pd_id', 'pd_name', 'pd_description', 'pd_catid', 'pd_catsubid',
+                'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_prodpv',
+                'pd_weight', 'pd_type', 'pd_musthave',
+                'pd_bestseller', 'pd_salespromo', 'pd_status', 'pd_date',
+                'pd_last_update', 'pd_parent_sku', 'pd_image',
+            ])
+            ->with([
+                'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_qty,pv_status,pv_date',
+                'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
+            ])
+            ->where('pd_status', 1)
+            ->where('pd_id', $id)
+            ->first();
+
+        if (! $product) {
+            return response()->json(['message' => 'Product not found.'], 404);
+        }
+
+        return response()->json([
+            'product' => $this->mapProduct($product),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $perPage = max(1, min((int) $request->integer('per_page', 25), 100));
