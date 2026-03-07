@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
+use App\Models\AdminNotification;
+use App\Models\AdminNotificationRead;
 use App\Models\CheckoutHistory;
 use App\Models\Customer;
 use App\Models\CustomerWalletLedger;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class AdminOrderController extends Controller
 {
@@ -20,76 +23,216 @@ class AdminOrderController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $now = now();
-        $approvalSlaCutoff = $now->copy()->subMinutes(45);
+        $this->backfillOrderNotificationsIfEmpty();
 
-        $pendingApprovalCount = (int) CheckoutHistory::query()
-            ->where('ch_approval_status', 'pending_approval')
-            ->count();
+        $limit = max(10, min(50, (int) $request->query('limit', 20)));
+        $rows = AdminNotification::query()
+            ->orderByDesc('an_created_at')
+            ->orderByDesc('an_id')
+            ->limit($limit)
+            ->get();
 
-        $overdueApprovalCount = (int) CheckoutHistory::query()
-            ->where('ch_approval_status', 'pending_approval')
-            ->where('created_at', '<=', $approvalSlaCutoff)
-            ->count();
+        $notificationIds = $rows->pluck('an_id')->map(fn ($id) => (int) $id)->all();
+        $readIds = [];
+        if (!empty($notificationIds)) {
+            $readIds = AdminNotificationRead::query()
+                ->where('anr_admin_id', (int) $admin->id)
+                ->whereIn('anr_notification_id', $notificationIds)
+                ->pluck('anr_notification_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+        $readLookup = array_fill_keys($readIds, true);
 
-        $failedPaymentsCount = (int) CheckoutHistory::query()
-            ->whereIn('ch_status', ['failed', 'cancelled', 'expired'])
-            ->count();
+        $items = $rows->map(function (AdminNotification $row) use ($readLookup) {
+            $id = (int) $row->an_id;
+            $isRead = isset($readLookup[$id]);
 
-        $fulfillmentQueueCount = (int) CheckoutHistory::query()
-            ->where('ch_approval_status', 'approved')
-            ->whereIn('ch_fulfillment_status', ['processing', 'packed', 'shipped', 'out_for_delivery'])
-            ->count();
+            return [
+                'id' => (string) $id,
+                'type' => (string) ($row->an_type ?? 'system'),
+                'title' => (string) $row->an_title,
+                'description' => (string) ($row->an_message ?? ''),
+                'severity' => (string) ($row->an_severity ?? 'info'),
+                'href' => (string) ($row->an_href ?? '/admin/orders'),
+                'count' => $isRead ? 0 : 1,
+                'is_read' => $isRead,
+                'updated_at' => optional($row->an_created_at)->toDateTimeString(),
+                'payload' => is_array($row->an_payload) ? $row->an_payload : null,
+            ];
+        })->values()->all();
 
-        $items = array_values(array_filter([
-            [
-                'id' => 'pending_approval',
-                'title' => 'Pending Order Approvals',
-                'description' => $pendingApprovalCount > 0
-                    ? $pendingApprovalCount . ' order(s) are waiting for approval.'
-                    : 'No pending approvals right now.',
-                'count' => $pendingApprovalCount,
-                'severity' => $pendingApprovalCount > 0 ? 'warning' : 'success',
-                'href' => '/admin/orders/pending',
-            ],
-            [
-                'id' => 'overdue_sla',
-                'title' => 'Approval SLA Overdue',
-                'description' => $overdueApprovalCount > 0
-                    ? $overdueApprovalCount . ' order(s) exceeded the 45-minute approval SLA.'
-                    : 'All pending approvals are within SLA.',
-                'count' => $overdueApprovalCount,
-                'severity' => $overdueApprovalCount > 0 ? 'critical' : 'success',
-                'href' => '/admin/orders/pending',
-            ],
-            [
-                'id' => 'failed_payments',
-                'title' => 'Failed Payments',
-                'description' => $failedPaymentsCount > 0
-                    ? $failedPaymentsCount . ' checkout(s) are tagged as failed/cancelled/expired.'
-                    : 'No failed payment records detected.',
-                'count' => $failedPaymentsCount,
-                'severity' => $failedPaymentsCount > 0 ? 'warning' : 'success',
-                'href' => '/admin/orders/failed_payments',
-            ],
-            [
-                'id' => 'fulfillment_queue',
-                'title' => 'Fulfillment In Progress',
-                'description' => $fulfillmentQueueCount > 0
-                    ? $fulfillmentQueueCount . ' approved order(s) are in fulfillment stages.'
-                    : 'No active fulfillment queue.',
-                'count' => $fulfillmentQueueCount,
-                'severity' => 'info',
-                'href' => '/admin/orders/processing',
-            ],
-        ], fn ($item) => is_array($item)));
-
-        $unreadCount = $pendingApprovalCount + $overdueApprovalCount + $failedPaymentsCount;
+        $unreadCount = collect($items)->where('is_read', false)->count();
 
         return response()->json([
             'unread_count' => $unreadCount,
             'items' => $items,
-            'generated_at' => $now->toDateTimeString(),
+            'generated_at' => now()->toDateTimeString(),
+        ]);
+    }
+
+    public function markNotificationRead(Request $request, int $id)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (!$admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $notification = AdminNotification::query()->where('an_id', $id)->first();
+        if (!$notification) {
+            return response()->json(['message' => 'Notification not found.'], 404);
+        }
+
+        AdminNotificationRead::query()->updateOrCreate(
+            [
+                'anr_notification_id' => (int) $notification->an_id,
+                'anr_admin_id' => (int) $admin->id,
+            ],
+            [
+                'anr_read_at' => now(),
+            ]
+        );
+
+        return response()->json(['message' => 'Notification marked as read.']);
+    }
+
+    public function markAllNotificationsRead(Request $request)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (!$admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $ids = AdminNotification::query()
+            ->orderByDesc('an_created_at')
+            ->orderByDesc('an_id')
+            ->limit(200)
+            ->pluck('an_id')
+            ->map(fn ($value) => (int) $value)
+            ->all();
+
+        if (empty($ids)) {
+            return response()->json(['message' => 'No notifications to mark as read.']);
+        }
+
+        $now = now();
+        $rows = array_map(
+            fn (int $notificationId) => [
+                'anr_notification_id' => $notificationId,
+                'anr_admin_id' => (int) $admin->id,
+                'anr_read_at' => $now,
+            ],
+            $ids
+        );
+
+        DB::table('tbl_admin_notification_reads')->upsert(
+            $rows,
+            ['anr_notification_id', 'anr_admin_id'],
+            ['anr_read_at']
+        );
+
+        return response()->json(['message' => 'All notifications marked as read.']);
+    }
+
+    private function backfillOrderNotificationsIfEmpty(): void
+    {
+        if (AdminNotification::query()->exists()) {
+            return;
+        }
+
+        $orders = CheckoutHistory::query()
+            ->orderByDesc('ch_paid_at')
+            ->orderByDesc('ch_id')
+            ->limit(100)
+            ->get([
+                'ch_id',
+                'ch_checkout_id',
+                'ch_customer_name',
+                'ch_amount',
+                'ch_approval_status',
+                'ch_fulfillment_status',
+                'ch_paid_at',
+                'created_at',
+            ]);
+
+        foreach ($orders as $order) {
+            $orderId = (int) $order->ch_id;
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            $customerName = trim((string) ($order->ch_customer_name ?? 'Customer'));
+            $checkoutId = trim((string) ($order->ch_checkout_id ?? ''));
+            $amount = (float) ($order->ch_amount ?? 0);
+            $approvalStatus = (string) ($order->ch_approval_status ?? 'pending_approval');
+            $fulfillmentStatus = (string) ($order->ch_fulfillment_status ?? 'pending');
+            $createdAt = $order->ch_paid_at ?? $order->created_at ?? now();
+
+            $severity = $approvalStatus === 'pending_approval' ? 'warning' : 'info';
+            if (in_array($fulfillmentStatus, ['cancelled', 'refunded'], true)) {
+                $severity = 'critical';
+            }
+
+            AdminNotification::query()->firstOrCreate(
+                [
+                    'an_type' => 'order_created',
+                    'an_source_type' => 'order',
+                    'an_source_id' => $orderId,
+                ],
+                [
+                    'an_severity' => $severity,
+                    'an_title' => 'Order Update',
+                    'an_message' => sprintf(
+                        '%s order %s (%s).',
+                        $customerName !== '' ? $customerName : 'Customer',
+                        $checkoutId !== '' ? $checkoutId : '#' . $orderId,
+                        'PHP ' . number_format($amount, 2)
+                    ),
+                    'an_href' => '/admin/orders',
+                    'an_payload' => [
+                        'order_id' => $orderId,
+                        'checkout_id' => $checkoutId,
+                        'customer_name' => $customerName,
+                        'amount' => $amount,
+                        'approval_status' => $approvalStatus,
+                        'fulfillment_status' => $fulfillmentStatus,
+                        'seeded' => true,
+                    ],
+                    'an_created_at' => $createdAt,
+                ]
+            );
+        }
+    }
+
+    public function pusherAuth(Request $request)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (!$admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'socket_id' => 'required|string|max:100',
+            'channel_name' => 'required|string|max:255',
+        ]);
+
+        $channelName = (string) $validated['channel_name'];
+        if (!Str::startsWith($channelName, 'private-admin-orders')) {
+            return response()->json(['message' => 'Forbidden channel.'], 403);
+        }
+
+        $key = (string) config('services.pusher.key', '');
+        $secret = (string) config('services.pusher.secret', '');
+
+        if ($key === '' || $secret === '') {
+            return response()->json(['message' => 'Pusher is not configured.'], 503);
+        }
+
+        $socketId = (string) $validated['socket_id'];
+        $signature = hash_hmac('sha256', $socketId . ':' . $channelName, $secret);
+
+        return response()->json([
+            'auth' => $key . ':' . $signature,
         ]);
     }
 

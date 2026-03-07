@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AdminMemberKycController;
 use App\Http\Controllers\Api\CustomerNotificationController;
 use App\Http\Controllers\Api\WishlistController;
+use App\Http\Controllers\Api\WebPageController;
 
 
 // Public auth routes
@@ -24,16 +25,20 @@ Route::prefix('auth')->group(function () {
 
 Route::post('/payments/checkout-session', [PaymentController::class, 'createCheckoutSession']);
 Route::get('/payments/checkout-session/{checkoutId}', [PaymentController::class, 'verifyCheckoutSession']);
+Route::post('/payments/webhooks/paymongo', [PaymentController::class, 'handlePaymongoWebhook']);
+Route::post('/payments/webhooks/test-paid', [PaymentController::class, 'handleTestPaidWebhook']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/products/slug/{slug}', [ProductController::class, 'showBySlug']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/products', [ProductController::class, 'index']);
+Route::get('/web-pages/home', [WebPageController::class, 'home']);
 
 
 // Protected routes (requires Sanctum token)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me',      [AuthController::class, 'me']);
+    Route::get('/auth/referral-tree', [AuthController::class, 'referralTree']);
     Route::put('/auth/me',      [AuthController::class, 'updateMe']);
     Route::get('/admin/members', [MemberController::class, 'index']);
     Route::get('/admin/members/stats', [MemberController::class, 'stats']);
@@ -55,6 +60,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/notifications/customer', [CustomerNotificationController::class, 'index']);
     Route::get('/admin/orders', [AdminOrderController::class, 'index']);
     Route::get('/admin/orders/notifications', [AdminOrderController::class, 'notifications']);
+    Route::post('/admin/orders/notifications/read-all', [AdminOrderController::class, 'markAllNotificationsRead']);
+    Route::post('/admin/orders/notifications/{id}/read', [AdminOrderController::class, 'markNotificationRead']);
+    Route::post('/admin/realtime/pusher/auth', [AdminOrderController::class, 'pusherAuth']);
     Route::patch('/admin/orders/{id}/approve', [AdminOrderController::class, 'approve']);
     Route::patch('/admin/orders/{id}/reject', [AdminOrderController::class, 'reject']);
     Route::patch('/admin/orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
@@ -72,6 +80,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/wishlist', [WishlistController::class, 'index']);
     Route::post('/wishlist', [WishlistController::class, 'store']);
     Route::delete('/wishlist/{productId}', [WishlistController::class, 'destroy']);
+    Route::get('/admin/web-pages/{type}', [WebPageController::class, 'adminIndex']);
+    Route::post('/admin/web-pages/{type}', [WebPageController::class, 'adminStore']);
+    Route::put('/admin/web-pages/{type}/{id}', [WebPageController::class, 'adminUpdate']);
+    Route::delete('/admin/web-pages/{type}/{id}', [WebPageController::class, 'adminDestroy']);
 });
 
 Route::prefix('admin/auth')->group(function () {

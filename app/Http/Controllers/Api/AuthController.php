@@ -158,6 +158,78 @@ class AuthController extends Controller
         return response()->json($this->transformCustomer($customer));
     }
 
+    public function referralTree(Request $request)
+    {
+        /** @var Customer $customer */
+        $customer = $request->user();
+
+        $levelOneMembers = Customer::query()
+            ->select([
+                'c_userid',
+                'c_username',
+                'c_fname',
+                'c_mname',
+                'c_lname',
+                'c_email',
+                'c_accnt_status',
+                'c_lockstatus',
+                'c_totalincome',
+                'c_date_started',
+                'c_sponsor',
+            ])
+            ->where('c_sponsor', (int) $customer->c_userid)
+            ->orderByDesc('c_userid')
+            ->get();
+
+        $levelOneIds = $levelOneMembers->pluck('c_userid')->all();
+
+        $levelTwoMembers = empty($levelOneIds)
+            ? collect()
+            : Customer::query()
+                ->select([
+                    'c_userid',
+                    'c_username',
+                    'c_fname',
+                    'c_mname',
+                    'c_lname',
+                    'c_email',
+                    'c_accnt_status',
+                    'c_lockstatus',
+                    'c_totalincome',
+                    'c_date_started',
+                    'c_sponsor',
+                ])
+                ->whereIn('c_sponsor', $levelOneIds)
+                ->orderByDesc('c_userid')
+                ->get();
+
+        $levelTwoBySponsor = $levelTwoMembers->groupBy('c_sponsor');
+        $secondLevelCount = $levelTwoMembers->count();
+        $directCount = $levelOneMembers->count();
+
+        $children = $levelOneMembers->map(function (Customer $member) use ($levelTwoBySponsor): array {
+            $childNodes = collect($levelTwoBySponsor->get((int) $member->c_userid, []))
+                ->map(fn (Customer $child): array => $this->transformReferralNode($child))
+                ->values();
+
+            $node = $this->transformReferralNode($member);
+            $node['children_count'] = $childNodes->count();
+            $node['children'] = $childNodes;
+
+            return $node;
+        })->values();
+
+        return response()->json([
+            'root' => $this->transformReferralNode($customer),
+            'summary' => [
+                'direct_count' => $directCount,
+                'second_level_count' => $secondLevelCount,
+                'total_network' => $directCount + $secondLevelCount,
+            ],
+            'children' => $children,
+        ]);
+    }
+
     public function updateMe(Request $request)
     {
         /** @var Customer $customer */
@@ -200,11 +272,7 @@ class AuthController extends Controller
 
     private function transformCustomer(Customer $customer): array
     {
-        $fullName = trim(implode(' ', array_filter([
-            $customer->c_fname,
-            $customer->c_mname,
-            $customer->c_lname,
-        ])));
+        $fullName = $this->fullName($customer);
 
         $accountStatus = (int) ($customer->c_accnt_status ?? 0);
         $lockStatus = (int) ($customer->c_lockstatus ?? 0);
@@ -227,6 +295,50 @@ class AuthController extends Controller
             'lock_status' => $lockStatus,
             'verification_status' => $verificationStatus,
         ];
+    }
+
+    private function transformReferralNode(Customer $customer): array
+    {
+        $accountStatus = (int) ($customer->c_accnt_status ?? 0);
+        $lockStatus = (int) ($customer->c_lockstatus ?? 0);
+
+        return [
+            'id' => (int) $customer->c_userid,
+            'name' => $this->fullName($customer),
+            'username' => (string) ($customer->c_username ?? ''),
+            'email' => (string) ($customer->c_email ?? ''),
+            'joined_at' => (string) ($customer->c_date_started ?? ''),
+            'total_earnings' => (float) ($customer->c_totalincome ?? 0),
+            'verification_status' => $this->verificationStatus($accountStatus, $lockStatus),
+        ];
+    }
+
+    private function fullName(Customer $customer): string
+    {
+        $fullName = trim(implode(' ', array_filter([
+            $customer->c_fname,
+            $customer->c_mname,
+            $customer->c_lname,
+        ])));
+
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        return (string) ($customer->c_username ?: ('Member #' . $customer->c_userid));
+    }
+
+    private function verificationStatus(int $accountStatus, int $lockStatus): string
+    {
+        if ($lockStatus === 1) {
+            return 'blocked';
+        }
+
+        return match ($accountStatus) {
+            1 => 'verified',
+            2 => 'pending_review',
+            default => 'not_verified',
+        };
     }
 
     private function splitName(string $name): array
