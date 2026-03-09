@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Category;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -14,6 +15,11 @@ class CategoryController extends Controller
     public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->query('q', ''));
+
+        $productCounts = DB::table('tbl_product')
+            ->selectRaw('pd_catid as category_id, COUNT(*) as total')
+            ->groupBy('pd_catid')
+            ->pluck('total', 'category_id');
 
         $categories = Category::select([
                 'cat_id', 'cat_name', 'cat_description',
@@ -35,8 +41,9 @@ class CategoryController extends Controller
                 'name'        => (string) ($c->cat_name ?? ''),
                 'description' => (string) ($c->cat_description ?? ''),
                 'url'         => (string) ($c->cat_url ?? ''),
-                'image'       => $c->cat_image ?? null,
+                'image'       => $this->normalizeCategoryImage($c->cat_image),
                 'order'       => (int)    $c->cat_order,
+                'product_count' => (int) ($productCounts[(int) $c->cat_id] ?? 0),
             ])
             ->values();
 
@@ -132,5 +139,24 @@ class CategoryController extends Controller
         $category->delete();
 
         return response()->json(['message' => 'Category deleted successfully.']);
+    }
+
+    private function normalizeCategoryImage(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $image = trim($value);
+        if ($image === '' || $image === '0') {
+            return null;
+        }
+
+        if (Str::startsWith($image, ['http://', 'https://', '//', 'data:'])) {
+            return $image;
+        }
+
+        $base = rtrim((string) config('app.url'), '/');
+        return $base !== '' ? $base . '/' . ltrim($image, '/') : $image;
     }
 }

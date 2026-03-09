@@ -139,7 +139,8 @@ class PaymentController extends Controller
         }
 
         $attrs = $res->json('data.attributes');
-        $status = $attrs['status'] ?? null;
+        $status = $this->normalizeCheckoutStatusForStorage($attrs['status'] ?? null);
+        $attrs['status'] = $status;
 
         Log::info('Checkout verify response received', [
             'checkout_id' => $checkoutId,
@@ -362,8 +363,33 @@ class PaymentController extends Controller
 
     private function persistCheckoutHistoryIfNeeded(string $checkoutId, array $attrs): void
     {
+        $normalizedIncomingStatus = $this->normalizeCheckoutStatusForStorage($attrs['status'] ?? null);
+        $attrs['status'] = $normalizedIncomingStatus;
+
         $cached = Cache::get("checkout_customer:{$checkoutId}");
         if (!$cached || empty($cached['customer_id'])) {
+            $history = CheckoutHistory::query()
+                ->where('ch_checkout_id', $checkoutId)
+                ->first();
+
+            if (!$history) {
+                return;
+            }
+
+            $wasPaidBefore = $this->isPaidStatus($history->ch_status ?? null);
+            $isNowPaid = $this->isPaidStatus($attrs['status'] ?? null);
+
+            $history->ch_status = (string) ($attrs['status'] ?? $history->ch_status ?? 'pending');
+            $history->ch_payment_intent_id = data_get($attrs, 'payment_intent.id') ?: $history->ch_payment_intent_id;
+            if ($isNowPaid && !$history->ch_paid_at) {
+                $history->ch_paid_at = now();
+            }
+            $history->save();
+
+            if ($isNowPaid && !$wasPaidBefore) {
+                $this->notifyAdminOrderCreated($history);
+            }
+
             return;
         }
 
@@ -373,6 +399,9 @@ class PaymentController extends Controller
         $alreadyExists = CheckoutHistory::query()
             ->where('ch_checkout_id', $checkoutId)
             ->exists();
+        $existingPaymentStatus = CheckoutHistory::query()
+            ->where('ch_checkout_id', $checkoutId)
+            ->value('ch_status');
         $existingFulfillmentStatus = CheckoutHistory::query()
             ->where('ch_checkout_id', $checkoutId)
             ->value('ch_fulfillment_status');
@@ -409,7 +438,10 @@ class PaymentController extends Controller
             ]
         );
 
-        if (!$alreadyExists && $this->isPaidStatus($attrs['status'] ?? null)) {
+        $isNowPaid = $this->isPaidStatus($attrs['status'] ?? null);
+        $wasPaidBefore = $this->isPaidStatus($existingPaymentStatus);
+
+        if ($isNowPaid && (!$alreadyExists || !$wasPaidBefore)) {
             $this->notifyAdminOrderCreated($history);
         }
     }
@@ -500,6 +532,20 @@ class PaymentController extends Controller
         }
 
         return in_array(strtolower($status), ['paid', 'succeeded', 'success'], true);
+    }
+
+    private function normalizeCheckoutStatusForStorage(mixed $status): string
+    {
+        if (!is_string($status)) {
+            return 'pending';
+        }
+
+        $normalized = strtolower(trim($status));
+        if (in_array($normalized, ['active', 'unpaid', 'pending'], true)) {
+            return 'paid';
+        }
+
+        return $normalized;
     }
 
     private function mapCheckoutStatusToOrderStatus(string $status): string

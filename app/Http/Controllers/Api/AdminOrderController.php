@@ -9,13 +9,20 @@ use App\Models\AdminNotificationRead;
 use App\Models\CheckoutHistory;
 use App\Models\Customer;
 use App\Models\CustomerWalletLedger;
+use App\Services\Shipping\XdeShippingService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class AdminOrderController extends Controller
 {
+    public function __construct(private readonly XdeShippingService $xdeShippingService)
+    {
+    }
+
     public function notifications(Request $request)
     {
         $admin = $this->resolveAdmin($request);
@@ -265,6 +272,10 @@ class AdminOrderController extends Controller
                 'ch_approved_by',
                 'ch_approved_at',
                 'ch_fulfillment_status',
+                'ch_courier',
+                'ch_tracking_no',
+                'ch_shipment_status',
+                'ch_shipped_at',
                 'ch_product_name',
                 'ch_product_id',
                 'ch_product_sku',
@@ -312,6 +323,10 @@ class AdminOrderController extends Controller
                 'approved_by' => $order->ch_approved_by ? (int) $order->ch_approved_by : null,
                 'approved_at' => optional($order->ch_approved_at)->toDateTimeString(),
                 'fulfillment_status' => $order->ch_fulfillment_status ?? 'pending',
+                'courier' => $order->ch_courier,
+                'tracking_no' => $order->ch_tracking_no,
+                'shipment_status' => $order->ch_shipment_status,
+                'shipped_at' => optional($order->ch_shipped_at)->toDateTimeString(),
                 'product_name' => $order->ch_product_name ?? ($order->ch_description ?? 'Order Item'),
                 'product_id' => $order->ch_product_id ? (int) $order->ch_product_id : null,
                 'product_sku' => $order->ch_product_sku,
@@ -425,8 +440,181 @@ class AdminOrderController extends Controller
         }
         $order->ch_fulfillment_status = $validated['status'];
         $order->save();
+        $shippingResult = $this->bookXdeShipmentOnShipped($order, (string) $validated['status']);
 
-        return response()->json(['message' => 'Order status updated.']);
+        $message = 'Order status updated.';
+        if (($shippingResult['state'] ?? '') === 'booked') {
+            $message = 'Order status updated. XDE shipment booked.';
+        } elseif (($shippingResult['state'] ?? '') === 'failed') {
+            $message = 'Order status updated. XDE booking failed.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'shipping' => $shippingResult,
+        ]);
+    }
+
+    public function updateShipmentStatus(Request $request, int $id)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (!$admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+        if (!$this->canUpdateFulfillment($admin)) {
+            return response()->json(['message' => 'Forbidden: tracking access is limited.'], 403);
+        }
+
+        $validated = $request->validate([
+            'shipment_status' => 'required|in:for_pickup,picked_up,in_transit,out_for_delivery,delivered,failed_delivery,returned_to_sender',
+        ]);
+
+        $order = CheckoutHistory::query()->where('ch_id', $id)->firstOrFail();
+        if (($order->ch_approval_status ?? 'pending_approval') !== 'approved') {
+            return response()->json(['message' => 'Order must be approved before shipment tracking updates.'], 422);
+        }
+
+        $shipmentStatus = (string) $validated['shipment_status'];
+        $order->ch_courier = $order->ch_courier ?: 'xde';
+        $order->ch_shipment_status = $shipmentStatus;
+
+        if (in_array($shipmentStatus, ['picked_up', 'in_transit', 'for_pickup'], true)) {
+            $order->ch_fulfillment_status = 'shipped';
+            if (!$order->ch_shipped_at) {
+                $order->ch_shipped_at = now();
+            }
+        } elseif ($shipmentStatus === 'out_for_delivery') {
+            $order->ch_fulfillment_status = 'out_for_delivery';
+        } elseif ($shipmentStatus === 'delivered') {
+            $order->ch_fulfillment_status = 'delivered';
+        } elseif (in_array($shipmentStatus, ['failed_delivery', 'returned_to_sender'], true)) {
+            $order->ch_fulfillment_status = 'cancelled';
+        }
+
+        $order->save();
+
+        return response()->json([
+            'message' => 'Shipment status updated.',
+            'order_id' => (int) $order->ch_id,
+            'shipment_status' => $order->ch_shipment_status,
+            'fulfillment_status' => $order->ch_fulfillment_status,
+        ]);
+    }
+
+    private function bookXdeShipmentOnShipped(CheckoutHistory $order, string $status): array
+    {
+        if ($status !== 'shipped') {
+            return ['state' => 'skipped', 'reason' => 'status_not_shipped'];
+        }
+
+        $hasConfig = (string) config('services.xde.base_url', '') !== ''
+            && (string) config('services.xde.api_key', '') !== ''
+            && (string) config('services.xde.token', '') !== '';
+        if (!$hasConfig) {
+            return ['state' => 'skipped', 'reason' => 'xde_not_configured'];
+        }
+
+        if (!empty($order->ch_tracking_no) && strtolower((string) $order->ch_courier) === 'xde') {
+            return [
+                'state' => 'skipped',
+                'reason' => 'already_booked',
+                'tracking_no' => (string) $order->ch_tracking_no,
+            ];
+        }
+
+        $payload = [
+            'reference_no' => (string) ($order->ch_checkout_id ?? ''),
+            'recipient_name' => (string) ($order->ch_customer_name ?? ''),
+            'recipient_phone' => (string) ($order->ch_customer_phone ?? ''),
+            'recipient_email' => (string) ($order->ch_customer_email ?? ''),
+            'recipient_address' => (string) ($order->ch_customer_address ?? ''),
+            'declared_value' => (float) ($order->ch_amount ?? 0),
+            'payment_method' => (string) ($order->ch_payment_method ?? ''),
+            'items' => [[
+                'name' => (string) ($order->ch_product_name ?? 'Order Item'),
+                'quantity' => (int) ($order->ch_quantity ?? 1),
+            ]],
+        ];
+
+        try {
+            $response = $this->xdeShippingService->bookShipment($payload);
+            $trackingNo = $this->extractTrackingNoFromShipment($response);
+            $shipmentStatus = $this->extractShipmentStatus($response);
+
+            $order->ch_courier = 'xde';
+            if ($trackingNo !== null) {
+                $order->ch_tracking_no = $trackingNo;
+            }
+            if ($shipmentStatus !== null) {
+                $order->ch_shipment_status = $shipmentStatus;
+            }
+            $order->ch_shipment_payload = $response;
+            if ($trackingNo !== null && !$order->ch_shipped_at) {
+                $order->ch_shipped_at = now();
+            }
+            $order->save();
+
+            return [
+                'state' => 'booked',
+                'tracking_no' => $order->ch_tracking_no,
+                'shipment_status' => $order->ch_shipment_status,
+            ];
+        } catch (RuntimeException $e) {
+            Log::warning('XDE auto-booking failed on shipped status update.', [
+                'order_id' => (int) $order->ch_id,
+                'checkout_id' => (string) $order->ch_checkout_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'state' => 'failed',
+                'reason' => 'xde_book_failed',
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    private function extractTrackingNoFromShipment(array $response): ?string
+    {
+        $candidates = [
+            data_get($response, 'tracking_no'),
+            data_get($response, 'tracking_number'),
+            data_get($response, 'waybill_no'),
+            data_get($response, 'awb'),
+            data_get($response, 'data.tracking_no'),
+            data_get($response, 'data.tracking_number'),
+            data_get($response, 'data.waybill_no'),
+            data_get($response, 'result.tracking_no'),
+            data_get($response, 'result.tracking_number'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return trim($candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractShipmentStatus(array $response): ?string
+    {
+        $candidates = [
+            data_get($response, 'status'),
+            data_get($response, 'shipment_status'),
+            data_get($response, 'data.status'),
+            data_get($response, 'data.shipment_status'),
+            data_get($response, 'result.status'),
+            data_get($response, 'result.shipment_status'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return strtolower(trim($candidate));
+            }
+        }
+
+        return null;
     }
 
     private function resolveAdmin(Request $request): ?Admin

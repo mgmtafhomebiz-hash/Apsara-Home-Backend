@@ -37,6 +37,11 @@ class CheckoutHistory extends Model
         'ch_customer_email',
         'ch_customer_phone',
         'ch_customer_address',
+        'ch_courier',
+        'ch_tracking_no',
+        'ch_shipment_status',
+        'ch_shipment_payload',
+        'ch_shipped_at',
         'ch_paid_at',
     ];
 
@@ -48,5 +53,7 @@ class CheckoutHistory extends Model
         'ch_paid_at' => 'datetime',
         'ch_approved_at' => 'datetime',
         'ch_pv_posted_at' => 'datetime',
+        'ch_shipped_at' => 'datetime',
+        'ch_shipment_payload' => 'array',
     ];
 }

@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\AdminMemberKycController;
 use App\Http\Controllers\Api\CustomerNotificationController;
 use App\Http\Controllers\Api\WishlistController;
 use App\Http\Controllers\Api\WebPageController;
+use App\Http\Controllers\Api\XdeShippingController;
 
 
 // Public auth routes
@@ -66,6 +67,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/admin/orders/{id}/approve', [AdminOrderController::class, 'approve']);
     Route::patch('/admin/orders/{id}/reject', [AdminOrderController::class, 'reject']);
     Route::patch('/admin/orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
+    Route::patch('/admin/orders/{id}/shipment-status', [AdminOrderController::class, 'updateShipmentStatus']);
+    Route::post('/admin/orders/{id}/shipping/xde/book', [XdeShippingController::class, 'bookForOrder']);
+    Route::get('/admin/orders/{id}/shipping/xde/track', [XdeShippingController::class, 'trackByOrder']);
+    Route::get('/admin/shipping/xde/track/{trackingNo}', [XdeShippingController::class, 'trackByTrackingNo']);
     Route::get('/admin/encashment', [AdminEncashmentController::class, 'index']);
     Route::patch('/admin/encashment/{id}/approve', [AdminEncashmentController::class, 'approve']);
     Route::patch('/admin/encashment/{id}/reject', [AdminEncashmentController::class, 'reject']);

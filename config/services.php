@@ -49,4 +49,13 @@ return [
         'use_tls' => env('PUSHER_APP_TLS', true),
     ],
 
+    'xde' => [
+        'base_url' => env('XDE_BASE_URL'),
+        'book_path' => env('XDE_BOOK_PATH', '/api/v1/shipments'),
+        'track_path' => env('XDE_TRACK_PATH', '/api/v1/shipments/{tracking_no}'),
+        'api_key' => env('XDE_API_KEY'),
+        'token' => env('XDE_TOKEN'),
+        'timeout' => (int) env('XDE_TIMEOUT', 20),
+    ],
+
 ];

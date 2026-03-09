@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerWalletLedger;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class MemberController extends Controller
 {
@@ -118,8 +120,28 @@ class MemberController extends Controller
                     ->groupBy('c_sponsor')
                     ->pluck('total', 'c_sponsor');
 
+            $walletCreditsByCustomer = collect();
+            if (!empty($pageUserIds) && Schema::hasTable('tbl_customer_wallet_ledger')) {
+                $walletCreditRows = CustomerWalletLedger::query()
+                    ->selectRaw('wl_customer_id, wl_wallet_type, SUM(wl_amount) as total_amount')
+                    ->whereIn('wl_customer_id', $pageUserIds)
+                    ->where('wl_entry_type', 'credit')
+                    ->whereIn('wl_wallet_type', ['cash', 'pv'])
+                    ->groupBy('wl_customer_id', 'wl_wallet_type')
+                    ->get();
+
+                $walletCreditsByCustomer = $walletCreditRows
+                    ->groupBy('wl_customer_id')
+                    ->map(function ($rows) {
+                        return [
+                            'cash' => (float) (($rows->firstWhere('wl_wallet_type', 'cash')->total_amount ?? 0)),
+                            'pv' => (float) (($rows->firstWhere('wl_wallet_type', 'pv')->total_amount ?? 0)),
+                        ];
+                    });
+            }
+
             $members = collect($paginator->items())
-                ->map(function (Customer $customer) use ($referralCounts): array {
+                ->map(function (Customer $customer) use ($referralCounts, $walletCreditsByCustomer): array {
                     $fullName = trim(implode(' ', array_filter([
                         (string) $customer->c_fname,
                         (string) $customer->c_mname,
@@ -143,6 +165,7 @@ class MemberController extends Controller
                     $tier = $this->mapTier($rank);
                     $joinedAt = $this->formatDate($customer->c_date_started);
                     $lastActiveAt = $this->formatDate($customer->c_last_logindate) ?: $joinedAt;
+                    $walletCredits = $walletCreditsByCustomer->get((int) $customer->c_userid, ['cash' => 0, 'pv' => 0]);
 
                     return [
                         'id' => (int) $customer->c_userid,
@@ -155,6 +178,10 @@ class MemberController extends Controller
                         'orders' => (int) $customer->c_totalpair,
                         'totalSpent' => (float) $customer->c_gpv,
                         'earnings' => (float) $customer->c_totalincome,
+                        'walletCashBalance' => (float) ($customer->c_totalincome ?? 0),
+                        'walletPvBalance' => (float) ($customer->c_gpv ?? 0),
+                        'walletCashCredits' => (float) ($walletCredits['cash'] ?? 0),
+                        'walletPvCredits' => (float) ($walletCredits['pv'] ?? 0),
                         'referrals' => (int) ($referralCounts[(int) $customer->c_userid] ?? 0),
                         'joinedAt' => $joinedAt,
                         'lastActiveAt' => $lastActiveAt,
