@@ -217,6 +217,7 @@ class ProductController extends Controller
         $perPage = max(1, min((int) $request->integer('per_page', 25), 100));
         $search  = trim((string) $request->query('q', ''));
         $status  = $request->query('status', '');
+        $catId   = $request->query('cat_id', '');
 
         $query = Product::query()
             ->select([
@@ -241,6 +242,9 @@ class ProductController extends Controller
             })
             ->when($status !== '', function ($q) use ($status) {
                 $q->where('pd_status', (int) $status);
+            })
+            ->when($catId !== '', function ($q) use ($catId) {
+                $q->where('pd_catid', (int) $catId);
             })
             ->orderByDesc('pd_id');
 
