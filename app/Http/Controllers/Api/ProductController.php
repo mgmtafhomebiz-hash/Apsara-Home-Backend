@@ -348,8 +348,8 @@ class ProductController extends Controller
                 'pd_shopid'      => 0,
                 'pd_description'       => $request->pd_description ?? '',
                 'pd_specifications'    => $request->pd_specifications ?? null,
-                'pd_material'          => $request->pd_material ?? null,
-                'pd_warranty'          => $request->pd_warranty ?? null,
+                'pd_material'          => $request->filled('pd_material') ? (string) $request->pd_material : '',
+                'pd_warranty'          => $request->filled('pd_warranty') ? (string) $request->pd_warranty : '',
                 'pd_supplier'    => 0,
                 'pd_price_srp'   => $request->pd_price_srp ?? 0,
                 'pd_price_dp'    => $request->pd_price_dp ?? 0,
@@ -472,7 +472,11 @@ class ProductController extends Controller
         DB::transaction(function () use ($request, $product, $fields) {
             foreach ($fields as $field) {
                 if ($request->has($field)) {
-                    $product->$field = $request->$field;
+                    if (in_array($field, ['pd_material', 'pd_warranty'], true)) {
+                        $product->$field = $request->filled($field) ? (string) $request->$field : '';
+                    } else {
+                        $product->$field = $request->$field;
+                    }
                 }
             }
 
