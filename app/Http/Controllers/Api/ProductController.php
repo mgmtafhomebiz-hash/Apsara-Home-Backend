@@ -338,6 +338,7 @@ class ProductController extends Controller
             $images = [trim($request->pd_image)];
         }
 
+        try {
         $product = DB::transaction(function () use ($request, $now, $images) {
             $product = Product::create([
                 'pd_name'        => $request->pd_name,
@@ -389,6 +390,13 @@ class ProductController extends Controller
 
             return $product;
         });
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Product store failed: ' . $e->getMessage(), [
+                'sql'  => method_exists($e, 'getSql') ? $e->getSql() : null,
+                'file' => $e->getFile() . ':' . $e->getLine(),
+            ]);
+            return response()->json(['message' => 'Server error: ' . $e->getMessage()], 500);
+        }
 
         return response()->json([
             'message' => 'Product created successfully.',

@@ -22,6 +22,14 @@ return new class extends Migration
                 DB::statement("ALTER TABLE tbl_product ALTER COLUMN {$column} DROP NOT NULL");
             }
         }
+
+        // Fix tbl_product_photo nullable columns
+        $photoColumns = ['pp_varone', 'pp_date'];
+        foreach ($photoColumns as $column) {
+            if (Schema::hasColumn('tbl_product_photo', $column)) {
+                DB::statement("ALTER TABLE tbl_product_photo ALTER COLUMN {$column} DROP NOT NULL");
+            }
+        }
     }
 
     public function down(): void
