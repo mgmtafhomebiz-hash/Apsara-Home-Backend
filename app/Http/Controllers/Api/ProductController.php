@@ -525,15 +525,21 @@ class ProductController extends Controller
                 $product->save();
             });
         } catch (\Throwable $e) {
-            Log::error('Product update failed', [
+            $debugDetails = [
                 'product_id' => $id,
-                'message' => $e->getMessage(),
                 'exception' => $e::class,
+                'message' => $e->getMessage(),
                 'file' => $e->getFile() . ':' . $e->getLine(),
                 'sql' => method_exists($e, 'getSql') ? $e->getSql() : null,
-                'bindings' => method_exists($e, 'getBindings') ? $e->getBindings() : null,
-                'payload' => $request->except([]),
-            ]);
+                'bindings' => method_exists($e, 'getBindings') ? json_encode($e->getBindings(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null,
+                'payload' => json_encode($request->all(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ];
+
+            $flatLog = collect($debugDetails)
+                ->map(fn ($value, $key) => $key . '=' . ($value === null ? 'null' : $value))
+                ->implode(' | ');
+
+            Log::error('Product update failed | ' . $flatLog);
 
             return response()->json([
                 'message' => 'Server error: ' . $e->getMessage(),
