@@ -25,18 +25,32 @@ class CustomerNotificationController extends Controller
             ->where('ch_customer_id', $customerId)
             ->whereNotIn('ch_fulfillment_status', ['delivered', 'cancelled', 'refunded'])
             ->count();
+        $pendingOrdersLatestAt = CheckoutHistory::query()
+            ->where('ch_customer_id', $customerId)
+            ->whereNotIn('ch_fulfillment_status', ['delivered', 'cancelled', 'refunded'])
+            ->max('updated_at');
 
         $shippingUpdatesCount = (int) CheckoutHistory::query()
             ->where('ch_customer_id', $customerId)
             ->whereIn('ch_fulfillment_status', ['shipped', 'out_for_delivery', 'delivered'])
             ->where('updated_at', '>=', $now->copy()->subDays(7))
             ->count();
+        $shippingUpdatesLatestAt = CheckoutHistory::query()
+            ->where('ch_customer_id', $customerId)
+            ->whereIn('ch_fulfillment_status', ['shipped', 'out_for_delivery', 'delivered'])
+            ->where('updated_at', '>=', $now->copy()->subDays(7))
+            ->max('updated_at');
 
         $encashmentUpdatesCount = (int) EncashmentRequest::query()
             ->where('er_customer_id', $customerId)
             ->whereIn('er_status', ['approved_by_admin', 'released', 'rejected', 'failed'])
             ->where('updated_at', '>=', $now->copy()->subDays(14))
             ->count();
+        $encashmentUpdatesLatestAt = EncashmentRequest::query()
+            ->where('er_customer_id', $customerId)
+            ->whereIn('er_status', ['approved_by_admin', 'released', 'rejected', 'failed'])
+            ->where('updated_at', '>=', $now->copy()->subDays(14))
+            ->max('updated_at');
 
         $recentReferrals = Customer::query()
             ->where('c_sponsor', $customerId)
@@ -53,6 +67,7 @@ class CustomerNotificationController extends Controller
             ]);
 
         $recentReferralCount = $recentReferrals->count();
+        $recentReferralLatestAt = optional($recentReferrals->first())->c_date_started;
         $recentReferralNames = $recentReferrals
             ->take(3)
             ->map(function (Customer $referral) {
@@ -79,6 +94,7 @@ class CustomerNotificationController extends Controller
                 'count' => $pendingOrdersCount,
                 'severity' => $pendingOrdersCount > 0 ? 'info' : 'success',
                 'href' => '/orders',
+                'latest_at' => $pendingOrdersLatestAt,
             ],
             [
                 'id' => 'shipping_updates',
@@ -89,6 +105,7 @@ class CustomerNotificationController extends Controller
                 'count' => $shippingUpdatesCount,
                 'severity' => $shippingUpdatesCount > 0 ? 'warning' : 'success',
                 'href' => '/orders',
+                'latest_at' => $shippingUpdatesLatestAt,
             ],
             [
                 'id' => 'encashment_updates',
@@ -99,6 +116,7 @@ class CustomerNotificationController extends Controller
                 'count' => $encashmentUpdatesCount,
                 'severity' => $encashmentUpdatesCount > 0 ? 'warning' : 'success',
                 'href' => '/profile',
+                'latest_at' => $encashmentUpdatesLatestAt,
             ],
             [
                 'id' => 'referral_registrations',
@@ -109,6 +127,7 @@ class CustomerNotificationController extends Controller
                 'count' => $recentReferralCount,
                 'severity' => $recentReferralCount > 0 ? 'success' : 'info',
                 'href' => '/profile',
+                'latest_at' => $recentReferralLatestAt,
             ],
             [
                 'id' => 'kyc_status',
@@ -116,7 +135,8 @@ class CustomerNotificationController extends Controller
                 'description' => $kycMeta['description'],
                 'count' => $kycActionCount,
                 'severity' => $kycMeta['severity'],
-                'href' => '/profile',
+                'href' => '/verification',
+                'latest_at' => $kycMeta['latest_at'],
             ],
         ];
 
@@ -154,6 +174,7 @@ class CustomerNotificationController extends Controller
                 'count' => ($reviewedAt && $reviewedAt >= $recentKycWindow) ? 1 : 0,
                 'severity' => 'success',
                 'description' => 'Your KYC verification has been approved. Your affiliate account is now verified.',
+                'latest_at' => $reviewedAt?->toDateTimeString(),
             ];
         }
 
@@ -164,6 +185,7 @@ class CustomerNotificationController extends Controller
                 'count' => ($reviewedAt && $reviewedAt >= $recentKycWindow) ? 1 : 0,
                 'severity' => 'critical',
                 'description' => 'Your KYC verification was rejected. Please review the requirements and resubmit your documents.',
+                'latest_at' => $reviewedAt?->toDateTimeString(),
             ];
         }
 
@@ -172,6 +194,7 @@ class CustomerNotificationController extends Controller
                 'count' => 0,
                 'severity' => 'success',
                 'description' => 'Your account is verified.',
+                'latest_at' => null,
             ];
         }
 
@@ -185,6 +208,7 @@ class CustomerNotificationController extends Controller
                 'count' => 1,
                 'severity' => 'warning',
                 'description' => 'KYC is under review. Wait for admin update.',
+                'latest_at' => optional($latestKyc?->updated_at ?? $latestKyc?->created_at)?->toDateTimeString(),
             ];
         }
 
@@ -192,6 +216,7 @@ class CustomerNotificationController extends Controller
             'count' => 1,
             'severity' => 'warning',
             'description' => 'KYC not submitted. Complete verification to unlock full features.',
+            'latest_at' => null,
         ];
     }
 
