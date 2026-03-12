@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminNotification;
 use App\Models\Customer;
 use App\Models\CustomerVerificationRequest;
 use App\Models\CustomerWalletLedger;
 use App\Models\EncashmentPayoutMethod;
 use App\Models\EncashmentRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Pusher\Pusher;
 
 class EncashmentController extends Controller
 {
@@ -364,7 +367,7 @@ class EncashmentController extends Controller
         ]);
 
         $referenceNo = $this->generateVerificationReferenceNo();
-        CustomerVerificationRequest::create([
+        $verificationRequest = CustomerVerificationRequest::create([
             'cvr_customer_id' => (int) $customer->c_userid,
             'cvr_reference_no' => $referenceNo,
             'cvr_status' => 'pending_review',
@@ -389,6 +392,8 @@ class EncashmentController extends Controller
             $customer->c_accnt_status = 2; // KYC/verification review queue
             $customer->save();
         }
+
+        $this->notifyAdminKycSubmitted($customer->fresh(), $verificationRequest);
 
         return response()->json([
             'message' => 'Verification request submitted. Please wait for admin approval.',
@@ -453,6 +458,80 @@ class EncashmentController extends Controller
         }
 
         return sprintf('KYC-%s-%s', $date, strtoupper(substr(md5((string) microtime(true)), 0, 6)));
+    }
+
+    private function notifyAdminKycSubmitted(Customer $customer, CustomerVerificationRequest $verificationRequest): void
+    {
+        $customerName = trim(implode(' ', array_filter([
+            $verificationRequest->cvr_full_name ?: null,
+            $customer->c_fname ?? null,
+            $customer->c_mname ?? null,
+            $customer->c_lname ?? null,
+        ])));
+        $displayName = $customerName !== '' ? $customerName : ($customer->c_username ?: 'Affiliate');
+        $referenceNo = (string) ($verificationRequest->cvr_reference_no ?? '');
+
+        $notification = AdminNotification::query()->firstOrCreate(
+            [
+                'an_type' => 'kyc_submitted',
+                'an_source_type' => 'kyc_request',
+                'an_source_id' => (int) $verificationRequest->cvr_id,
+            ],
+            [
+                'an_severity' => 'warning',
+                'an_title' => 'New KYC Verification Request',
+                'an_message' => sprintf(
+                    '%s submitted a KYC request%s.',
+                    $displayName,
+                    $referenceNo !== '' ? ' (' . $referenceNo . ')' : ''
+                ),
+                'an_href' => '/admin/members/kyc',
+                'an_payload' => [
+                    'kyc_request_id' => (int) $verificationRequest->cvr_id,
+                    'customer_id' => (int) $customer->c_userid,
+                    'customer_name' => $displayName,
+                    'customer_email' => $customer->c_email,
+                    'reference_no' => $referenceNo,
+                    'status' => 'pending_review',
+                ],
+                'an_created_at' => now(),
+            ]
+        );
+
+        $appId = (string) config('services.pusher.app_id', '');
+        $key = (string) config('services.pusher.key', '');
+        $secret = (string) config('services.pusher.secret', '');
+
+        if ($appId === '' || $key === '' || $secret === '') {
+            return;
+        }
+
+        try {
+            $pusher = new Pusher(
+                $key,
+                $secret,
+                $appId,
+                [
+                    'cluster' => (string) config('services.pusher.cluster', 'ap1'),
+                    'useTLS' => (bool) config('services.pusher.use_tls', true),
+                ]
+            );
+
+            $pusher->trigger('private-admin-orders', 'notification.created', [
+                'id' => (int) $notification->an_id,
+                'type' => 'kyc_submitted',
+                'title' => (string) $notification->an_title,
+                'description' => (string) $notification->an_message,
+                'href' => (string) ($notification->an_href ?? '/admin/members/kyc'),
+                'created_at' => now()->toDateTimeString(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to publish admin realtime KYC notification.', [
+                'kyc_request_id' => (int) $verificationRequest->cvr_id,
+                'customer_id' => (int) $customer->c_userid,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function transform(EncashmentRequest $row, Customer $customer): array

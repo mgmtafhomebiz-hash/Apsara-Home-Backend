@@ -38,6 +38,37 @@ class CustomerNotificationController extends Controller
             ->where('updated_at', '>=', $now->copy()->subDays(14))
             ->count();
 
+        $recentReferrals = Customer::query()
+            ->where('c_sponsor', $customerId)
+            ->where(function ($query) use ($now) {
+                $query->where('c_date_started', '>=', $now->copy()->subDays(14))
+                    ->orWhere('created_at', '>=', $now->copy()->subDays(14));
+            })
+            ->orderByDesc('c_date_started')
+            ->orderByDesc('c_userid')
+            ->get([
+                'c_userid',
+                'c_username',
+                'c_fname',
+                'c_mname',
+                'c_lname',
+                'c_date_started',
+            ]);
+
+        $recentReferralCount = $recentReferrals->count();
+        $recentReferralNames = $recentReferrals
+            ->take(3)
+            ->map(function (Customer $referral) {
+                $name = trim(implode(' ', array_filter([
+                    $referral->c_fname ?? null,
+                    $referral->c_mname ?? null,
+                    $referral->c_lname ?? null,
+                ])));
+
+                return $name !== '' ? $name : ((string) ($referral->c_username ?? 'New referral'));
+            })
+            ->values();
+
         $kycMeta = $this->resolveKycMeta($customer);
         $kycActionCount = $kycMeta['count'];
 
@@ -73,6 +104,16 @@ class CustomerNotificationController extends Controller
                 'href' => '/profile',
             ],
             [
+                'id' => 'referral_registrations',
+                'title' => 'Referral Registrations',
+                'description' => $recentReferralCount > 0
+                    ? $this->buildReferralDescription($recentReferralCount, $recentReferralNames->all())
+                    : 'No new referral registrations recently.',
+                'count' => $recentReferralCount,
+                'severity' => $recentReferralCount > 0 ? 'success' : 'info',
+                'href' => '/profile',
+            ],
+            [
                 'id' => 'kyc_status',
                 'title' => 'KYC Verification',
                 'description' => $kycMeta['description'],
@@ -82,7 +123,7 @@ class CustomerNotificationController extends Controller
             ],
         ];
 
-        $unreadCount = $shippingUpdatesCount + $encashmentUpdatesCount + $kycActionCount;
+        $unreadCount = $shippingUpdatesCount + $encashmentUpdatesCount + $recentReferralCount + $kycActionCount;
 
         return response()->json([
             'unread_count' => $unreadCount,
@@ -95,12 +136,37 @@ class CustomerNotificationController extends Controller
     {
         $status = (int) ($customer->c_accnt_status ?? 0);
         $lock = (int) ($customer->c_lockstatus ?? 0);
+        $latestKyc = CustomerVerificationRequest::query()
+            ->where('cvr_customer_id', (int) $customer->c_userid)
+            ->latest('cvr_id')
+            ->first();
+        $recentKycWindow = now()->subDays(14);
 
         if ($lock === 1) {
             return [
                 'count' => 1,
                 'severity' => 'critical',
                 'description' => 'Account is blocked. Please contact support.',
+            ];
+        }
+
+        if ($latestKyc && (string) $latestKyc->cvr_status === 'approved') {
+            $reviewedAt = $latestKyc->cvr_reviewed_at ?? $latestKyc->updated_at ?? $latestKyc->created_at;
+
+            return [
+                'count' => ($reviewedAt && $reviewedAt >= $recentKycWindow) ? 1 : 0,
+                'severity' => 'success',
+                'description' => 'Your KYC verification has been approved. Your affiliate account is now verified.',
+            ];
+        }
+
+        if ($latestKyc && (string) $latestKyc->cvr_status === 'rejected') {
+            $reviewedAt = $latestKyc->cvr_reviewed_at ?? $latestKyc->updated_at ?? $latestKyc->created_at;
+
+            return [
+                'count' => ($reviewedAt && $reviewedAt >= $recentKycWindow) ? 1 : 0,
+                'severity' => 'critical',
+                'description' => 'Your KYC verification was rejected. Please review the requirements and resubmit your documents.',
             ];
         }
 
@@ -130,5 +196,24 @@ class CustomerNotificationController extends Controller
             'severity' => 'warning',
             'description' => 'KYC not submitted. Complete verification to unlock full features.',
         ];
+    }
+
+    private function buildReferralDescription(int $count, array $names): string
+    {
+        if ($count <= 0) {
+            return 'No new referral registrations recently.';
+        }
+
+        if (empty($names)) {
+            return $count . ' new referral registration(s) used your link recently.';
+        }
+
+        $preview = implode(', ', array_slice($names, 0, 3));
+
+        if ($count <= 3) {
+            return sprintf('%s registered using your referral link.', $preview);
+        }
+
+        return sprintf('%s and %d more registered using your referral link.', $preview, $count - 3);
     }
 }
