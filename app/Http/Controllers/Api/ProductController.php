@@ -383,13 +383,13 @@ class ProductController extends Controller
                 throw $e;
             }
 
-            if (count($images) > 1) {
+            if (count($images) >= 1) {
                 foreach ($images as $url) {
                     try {
                         ProductPhoto::create([
                             'pp_pdid'     => $product->pd_id,
                             'pp_filename' => $url,
-                            'pp_varone'   => '',
+                            'pp_varone'   => null,
                             'pp_date'     => $now,
                         ]);
                     } catch (\Throwable $e) {
@@ -562,7 +562,7 @@ class ProductController extends Controller
                                     ProductPhoto::create([
                                         'pp_pdid'     => $product->pd_id,
                                         'pp_filename' => $url,
-                                        'pp_varone'   => '',
+                                        'pp_varone'   => null,
                                         'pp_date'     => now(),
                                     ]);
                                 } catch (\Throwable $e) {
