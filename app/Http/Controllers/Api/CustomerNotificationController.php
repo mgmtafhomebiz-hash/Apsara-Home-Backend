@@ -40,10 +40,7 @@ class CustomerNotificationController extends Controller
 
         $recentReferrals = Customer::query()
             ->where('c_sponsor', $customerId)
-            ->where(function ($query) use ($now) {
-                $query->where('c_date_started', '>=', $now->copy()->subDays(14))
-                    ->orWhere('created_at', '>=', $now->copy()->subDays(14));
-            })
+            ->where('c_date_started', '>=', $now->copy()->subDays(14))
             ->orderByDesc('c_date_started')
             ->orderByDesc('c_userid')
             ->get([
