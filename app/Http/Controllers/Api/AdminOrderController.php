@@ -625,12 +625,12 @@ class AdminOrderController extends Controller
 
     private function canApprove(Admin $admin): bool
     {
-        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin'], true);
+        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin', 'merchant_admin'], true);
     }
 
     private function canUpdateFulfillment(Admin $admin): bool
     {
-        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin', 'csr'], true);
+        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin', 'csr', 'merchant_admin'], true);
     }
 
     private function roleFromAdmin(Admin $admin): string
@@ -640,6 +640,8 @@ class AdminOrderController extends Controller
             2 => 'admin',
             3 => 'csr',
             4 => 'web_content',
+            7 => 'merchant_admin',
+            8 => 'supplier_admin',
             default => 'staff',
         };
     }

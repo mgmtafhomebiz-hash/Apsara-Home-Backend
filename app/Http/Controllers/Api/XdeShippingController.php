@@ -182,7 +182,7 @@ class XdeShippingController extends Controller
 
     private function canManageShipping(Admin $admin): bool
     {
-        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin', 'csr'], true);
+        return in_array($this->roleFromAdmin($admin), ['super_admin', 'admin', 'csr', 'merchant_admin'], true);
     }
 
     private function roleFromAdmin(Admin $admin): string
@@ -192,8 +192,9 @@ class XdeShippingController extends Controller
             2 => 'admin',
             3 => 'csr',
             4 => 'web_content',
+            7 => 'merchant_admin',
+            8 => 'supplier_admin',
             default => 'staff',
         };
     }
 }
-

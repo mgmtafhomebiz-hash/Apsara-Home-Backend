@@ -74,7 +74,7 @@ class AdminUserController extends Controller
             'name' => 'required|string|max:255',
             'username' => 'required|string|max:120|unique:tbl_admin,username',
             'email' => 'required|email|max:255|unique:tbl_admin,user_email',
-            'user_level_id' => ['required', 'integer', Rule::in([1, 2, 3, 4, 5, 6])],
+            'user_level_id' => ['required', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
         ]);
 
         return response()->json([
@@ -168,7 +168,7 @@ class AdminUserController extends Controller
                 Rule::unique('tbl_admin', 'user_email')->ignore($admin->id, 'id'),
             ],
             'password' => 'nullable|string|min:8',
-            'user_level_id' => ['nullable', 'integer', Rule::in([1, 2, 3, 4, 5, 6])],
+            'user_level_id' => ['nullable', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
         ]);
 
         if (array_key_exists('name', $validated)) {
@@ -237,6 +237,8 @@ class AdminUserController extends Controller
             4 => 'web_content',
             5 => 'accounting',
             6 => 'finance_officer',
+            7 => 'merchant_admin',
+            8 => 'supplier_admin',
             default => 'staff',
         };
     }

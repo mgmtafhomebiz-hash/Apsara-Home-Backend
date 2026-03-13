@@ -93,6 +93,8 @@ class AdminAuthController extends Controller
             4 => 'web_content',
             5 => 'accounting',
             6 => 'finance_officer',
+            7 => 'merchant_admin',
+            8 => 'supplier_admin',
             default => 'staff',
         };
     }
