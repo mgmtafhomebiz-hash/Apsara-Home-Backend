@@ -54,6 +54,7 @@ class AdminAuthController extends Controller
                 'email' => (string) $admin->user_email,
                 'role' => $role,
                 'user_level_id' => (int) $admin->user_level_id,
+                'supplier_id' => $admin->supplier_id ? (int) $admin->supplier_id : null,
             ],
             'token' => $token,
         ]);
@@ -81,6 +82,7 @@ class AdminAuthController extends Controller
             'email' => (string) $admin->user_email,
             'role' => $this->mapRole((int) $admin->user_level_id),
             'user_level_id' => (int) $admin->user_level_id,
+            'supplier_id' => $admin->supplier_id ? (int) $admin->supplier_id : null,
         ]);
     }
 

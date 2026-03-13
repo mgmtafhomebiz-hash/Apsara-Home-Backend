@@ -18,6 +18,7 @@ class ProductVariant extends Model
         'pv_size',
         'pv_price_srp',
         'pv_price_dp',
+        'pv_price_member',
         'pv_qty',
         'pv_status',
         'pv_date',
@@ -26,6 +27,7 @@ class ProductVariant extends Model
     protected $casts = [
         'pv_price_srp' => 'float',
         'pv_price_dp'  => 'float',
+        'pv_price_member' => 'float',
         'pv_qty'       => 'float',
         'pv_status'    => 'integer',
         'pv_date'      => 'datetime',
@@ -43,4 +45,3 @@ class ProductVariant extends Model
             ->orderBy('pvp_id');
     }
 }
-

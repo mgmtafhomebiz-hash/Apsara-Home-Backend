@@ -17,6 +17,9 @@ use App\Http\Controllers\Api\WishlistController;
 use App\Http\Controllers\Api\WebPageController;
 use App\Http\Controllers\Api\XdeShippingController;
 use App\Http\Controllers\Api\AddressController;
+use App\Http\Controllers\Api\SupplierController;
+use App\Http\Controllers\Api\SupplierAuthController;
+use App\Http\Controllers\Api\SupplierUserController;
 
 
 // Public auth routes
@@ -55,6 +58,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/admin/products/{id}', [ProductController::class, 'update']);
     Route::delete('/admin/products/{id}', [ProductController::class, 'destroy']);
     Route::get('/admin/categories', [CategoryController::class, 'index']);
+    Route::get('/admin/suppliers', [SupplierController::class, 'index']);
+    Route::post('/admin/suppliers', [SupplierController::class, 'store']);
+    Route::post('/admin/supplier-users', [SupplierUserController::class, 'store']);
     Route::post('/admin/categories', [CategoryController::class, 'store']);
     Route::put('/admin/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/admin/categories/{id}', [CategoryController::class, 'destroy']);
@@ -103,12 +109,26 @@ Route::prefix('admin/auth')->group(function () {
     Route::post('/login', [AdminAuthController::class, 'login']);
 });
 
+Route::prefix('supplier/auth')->group(function () {
+    Route::post('/login', [SupplierAuthController::class, 'login']);
+});
+
 Route::prefix('admin/invites')->group(function () {
     Route::get('/{token}', [AdminUserController::class, 'showInvite']);
     Route::post('/accept', [AdminUserController::class, 'acceptInvite']);
 });
 
+Route::prefix('supplier/invites')->group(function () {
+    Route::get('/{token}', [SupplierUserController::class, 'showInvite']);
+    Route::post('/accept', [SupplierUserController::class, 'acceptInvite']);
+});
+
 Route::middleware('auth:sanctum')->prefix('admin/auth')->group(function () {
     Route::post('/logout', [AdminAuthController::class, 'logout']);
     Route::get('/me', [AdminAuthController::class, 'me']);
+});
+
+Route::middleware('auth:sanctum')->prefix('supplier/auth')->group(function () {
+    Route::post('/logout', [SupplierAuthController::class, 'logout']);
+    Route::get('/me', [SupplierAuthController::class, 'me']);
 });

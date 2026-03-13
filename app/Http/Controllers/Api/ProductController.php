@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admin;
 use App\Models\Product;
 use App\Models\ProductPhoto;
 use App\Models\ProductVariant;
 use App\Models\ProductVariantPhoto;
+use App\Models\SupplierUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +17,48 @@ use Illuminate\Support\Facades\Validator;
 
 class ProductController extends Controller
 {
+    private function resolveAdmin(Request $request): ?Admin
+    {
+        $user = $request->user();
+        return $user instanceof Admin ? $user : null;
+    }
+
+    private function resolveSupplierUser(Request $request): ?SupplierUser
+    {
+        $user = $request->user();
+        return $user instanceof SupplierUser ? $user : null;
+    }
+
+    private function roleFromLevel(int $level): string
+    {
+        return match ($level) {
+            1 => 'super_admin',
+            2 => 'admin',
+            3 => 'csr',
+            4 => 'web_content',
+            5 => 'accounting',
+            6 => 'finance_officer',
+            7 => 'merchant_admin',
+            8 => 'supplier_admin',
+            default => 'staff',
+        };
+    }
+
+    private function scopeQueryToActor($query, ?Admin $admin, ?SupplierUser $supplierUser)
+    {
+        if ($supplierUser) {
+            $query->where('pd_supplier', (int) $supplierUser->su_supplier);
+            return $query;
+        }
+
+        if ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin') {
+            $supplierId = (int) ($admin->supplier_id ?? 0);
+            $query->where('pd_supplier', $supplierId > 0 ? $supplierId : -1);
+        }
+
+        return $query;
+    }
+
     private function normalizeSlug(string $value): string
     {
         $normalized = strtolower(trim($value));
@@ -43,6 +87,28 @@ class ProductController extends Controller
         return is_numeric($value) ? (float) $value : 0.0;
     }
 
+    private function toOptionalNumber(mixed $value): ?float
+    {
+        if (is_null($value)) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $normalized = preg_replace('/[^0-9.\-]/', '', $value) ?? '';
+            if ($normalized === '' || $normalized === '-' || $normalized === '.') {
+                return null;
+            }
+
+            return is_numeric($normalized) ? (float) $normalized : null;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
+        }
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
     private function mapVariants(Product $product): array
     {
         return $product->variants->map(function (ProductVariant $variant) {
@@ -58,9 +124,10 @@ class ProductController extends Controller
                 'color'    => (string) ($variant->pv_color ?? ''),
                 'colorHex' => (string) ($variant->pv_color_hex ?? ''),
                 'size'     => (string) ($variant->pv_size ?? ''),
-                'priceSrp' => $this->toNumber($variant->pv_price_srp),
-                'priceDp'  => $this->toNumber($variant->pv_price_dp),
-                'qty'      => $this->toNumber($variant->pv_qty),
+                'priceSrp' => $this->toOptionalNumber($variant->pv_price_srp),
+                'priceDp'  => $this->toOptionalNumber($variant->pv_price_dp),
+                'priceMember' => $this->toOptionalNumber($variant->pv_price_member),
+                'qty'      => $this->toOptionalNumber($variant->pv_qty),
                 'status'   => (int) ($variant->pv_status ?? 1),
                 'images'   => $images,
             ];
@@ -96,6 +163,7 @@ class ProductController extends Controller
                 'pv_size'      => $size !== '' ? $size : null,
                 'pv_price_srp' => isset($variant['pv_price_srp']) && $variant['pv_price_srp'] !== '' ? $variant['pv_price_srp'] : null,
                 'pv_price_dp'  => isset($variant['pv_price_dp']) && $variant['pv_price_dp'] !== '' ? $variant['pv_price_dp'] : null,
+                'pv_price_member' => isset($variant['pv_price_member']) && $variant['pv_price_member'] !== '' ? $variant['pv_price_member'] : null,
                 'pv_qty'       => isset($variant['pv_qty']) && $variant['pv_qty'] !== '' ? $variant['pv_qty'] : null,
                 'pv_status'    => isset($variant['pv_status']) ? (int) $variant['pv_status'] : 1,
                 'pv_date'      => $now,
@@ -133,6 +201,7 @@ class ProductController extends Controller
             'catsubid'          => (int)   $p->pd_catsubid,
             'priceSrp'          => $this->toNumber($p->pd_price_srp),
             'priceDp'           => $this->toNumber($p->pd_price_dp),
+            'priceMember'       => $this->toNumber($p->pd_price_member),
             'prodpv'            => $this->toNumber($p->pd_prodpv),
             'qty'               => $this->toNumber($p->pd_qty),
             'weight'            => (int)   $p->pd_weight,
@@ -168,7 +237,7 @@ class ProductController extends Controller
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
                 'pd_catid', 'pd_catsubid',
-                'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                 'pd_prodpv',
                 'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
                 'pd_assembly_required', 'pd_type', 'pd_musthave',
@@ -177,7 +246,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->where('pd_status', 1)
@@ -200,7 +269,7 @@ class ProductController extends Controller
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
                 'pd_catid', 'pd_catsubid',
-                'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                 'pd_prodpv',
                 'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
                 'pd_assembly_required', 'pd_type', 'pd_musthave',
@@ -209,7 +278,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->where('pd_status', 1)
@@ -227,6 +296,8 @@ class ProductController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
         $perPage = max(1, min((int) $request->integer('per_page', 25), 100));
         $search  = trim((string) $request->query('q', ''));
         $status  = $request->query('status', '');
@@ -236,7 +307,7 @@ class ProductController extends Controller
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
                 'pd_catid', 'pd_catsubid',
-                'pd_price_srp', 'pd_price_dp', 'pd_qty',
+                'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                 'pd_prodpv',
                 'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
                 'pd_assembly_required', 'pd_type', 'pd_musthave',
@@ -245,7 +316,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->when($search !== '', function ($q) use ($search) {
@@ -262,6 +333,8 @@ class ProductController extends Controller
                 $q->where('pd_catid', (int) $catId);
             })
             ->orderByDesc('pd_id');
+
+        $this->scopeQueryToActor($query, $admin, $supplierUser);
 
         $paginator = $query->paginate($perPage);
 
@@ -284,12 +357,20 @@ class ProductController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
+        if ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin' && ! $admin->supplier_id) {
+            return response()->json([
+                'message' => 'Supplier Admin account is not linked to a supplier company.',
+            ], 422);
+        }
         $validator = Validator::make($request->all(), [
             'pd_name'      => 'required|string|max:255',
             'pd_catid'     => 'required|integer',
             'pd_catsubid'  => 'nullable|integer',
             'pd_price_srp' => 'required|numeric|min:0',
             'pd_price_dp'  => 'nullable|numeric|min:0',
+            'pd_price_member' => 'nullable|numeric|min:0',
             'pd_prodpv'    => 'nullable|numeric|min:0',
             'pd_qty'       => 'nullable|numeric|min:0',
             'pd_weight'    => 'nullable|integer|min:0',
@@ -318,6 +399,7 @@ class ProductController extends Controller
             'pd_variants.*.pv_size'      => 'nullable|string|max:40',
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_qty'       => 'nullable|numeric|min:0',
             'pd_variants.*.pv_status'    => 'nullable|integer|in:0,1',
             'pd_variants.*.pv_images'    => 'nullable|array',
@@ -340,8 +422,15 @@ class ProductController extends Controller
         }
 
         try {
-        $product = DB::transaction(function () use ($request, $now, $images) {
+        $product = DB::transaction(function () use ($request, $now, $images, $admin, $supplierUser) {
             try {
+                $supplierId = $supplierUser
+                    ? (int) $supplierUser->su_supplier
+                    : (
+                        $admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin'
+                            ? (int) ($admin->supplier_id ?? 0)
+                            : 0
+                    );
                 $product = Product::create([
                     'pd_name'        => $request->pd_name,
                     'pd_catid'       => $request->pd_catid ?? 0,
@@ -352,9 +441,10 @@ class ProductController extends Controller
                     'pd_specifications'    => $request->pd_specifications ?? null,
                     'pd_material'          => $request->filled('pd_material') ? (string) $request->pd_material : '',
                     'pd_warranty'          => $request->filled('pd_warranty') ? (string) $request->pd_warranty : '',
-                    'pd_supplier'    => 0,
+                    'pd_supplier'    => $supplierId,
                     'pd_price_srp'   => $request->pd_price_srp ?? 0,
                     'pd_price_dp'    => $request->pd_price_dp ?? 0,
+                    'pd_price_member' => $request->pd_price_member,
                     'pd_prodpv'      => $request->pd_prodpv ?? 0,
                     'pd_qty'         => $request->pd_qty ?? 0,
                     'pd_weight'      => $request->pd_weight ?? 0,
@@ -427,6 +517,8 @@ class ProductController extends Controller
                 'id'       => $product->pd_id,
                 'name'     => $product->pd_name,
                 'priceSrp' => (float) $product->pd_price_srp,
+                'priceDp'  => $this->toNumber($product->pd_price_dp),
+                'priceMember' => $this->toNumber($product->pd_price_member),
                 'prodpv'   => (float) ($product->pd_prodpv ?? 0),
                 'status'   => (int) $product->pd_status,
             ],
@@ -435,7 +527,11 @@ class ProductController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
-        $product = Product::find($id);
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
+        $productQuery = Product::query()->where('pd_id', $id);
+        $this->scopeQueryToActor($productQuery, $admin, $supplierUser);
+        $product = $productQuery->first();
         if (! $product) {
             return response()->json(['message' => 'Product not found.'], 404);
         }
@@ -446,6 +542,7 @@ class ProductController extends Controller
             'pd_catsubid'    => 'nullable|integer',
             'pd_price_srp'   => 'sometimes|required|numeric|min:0',
             'pd_price_dp'    => 'nullable|numeric|min:0',
+            'pd_price_member'=> 'nullable|numeric|min:0',
             'pd_prodpv'      => 'nullable|numeric|min:0',
             'pd_qty'         => 'nullable|numeric|min:0',
             'pd_weight'      => 'nullable|integer|min:0',
@@ -474,6 +571,7 @@ class ProductController extends Controller
             'pd_variants.*.pv_size'      => 'nullable|string|max:40',
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_qty'       => 'nullable|numeric|min:0',
             'pd_variants.*.pv_status'    => 'nullable|integer|in:0,1',
             'pd_variants.*.pv_images'    => 'nullable|array',
@@ -487,7 +585,7 @@ class ProductController extends Controller
         $fields = [
             'pd_name', 'pd_catid', 'pd_catsubid', 'pd_description', 'pd_specifications',
             'pd_material', 'pd_warranty',
-            'pd_price_srp', 'pd_price_dp', 'pd_prodpv', 'pd_qty', 'pd_weight',
+            'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_prodpv', 'pd_qty', 'pd_weight',
             'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
             'pd_parent_sku', 'pd_type', 'pd_status',
         ];
@@ -624,7 +722,15 @@ class ProductController extends Controller
 
     public function destroy(int $id): JsonResponse
     {
-        $product = Product::find($id);
+        $actor = auth('sanctum')->user();
+        $productQuery = Product::query()->where('pd_id', $id);
+        if ($actor instanceof Admin) {
+            $this->scopeQueryToActor($productQuery, $actor, null);
+        }
+        if ($actor instanceof SupplierUser) {
+            $this->scopeQueryToActor($productQuery, null, $actor);
+        }
+        $product = $productQuery->first();
         if (! $product) {
             return response()->json(['message' => 'Product not found.'], 404);
         }

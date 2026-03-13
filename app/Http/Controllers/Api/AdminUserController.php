@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\Admin\AdminInviteMail;
 use App\Models\Admin;
+use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -37,6 +38,7 @@ class AdminUserController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 20);
 
         $rows = Admin::query()
+            ->with('supplier')
             ->when($search !== '', function ($builder) use ($search) {
                 $builder->where(function ($q) use ($search) {
                     $q->where('fname', 'like', "%{$search}%")
@@ -75,7 +77,10 @@ class AdminUserController extends Controller
             'username' => 'required|string|max:120|unique:tbl_admin,username',
             'email' => 'required|email|max:255|unique:tbl_admin,user_email',
             'user_level_id' => ['required', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
+            'supplier_id' => 'nullable|integer|exists:tbl_supplier,s_id',
         ]);
+
+        $this->ensureSupplierSelection($validated);
 
         return response()->json([
             'message' => $this->createAndSendInvite($validated, (int) $actor->id),
@@ -131,6 +136,7 @@ class AdminUserController extends Controller
             'user_email' => $email,
             'passworde' => Hash::make((string) $validated['password']),
             'user_level_id' => (int) $payload['user_level_id'],
+            'supplier_id' => isset($payload['supplier_id']) ? (int) $payload['supplier_id'] : null,
         ]);
 
         Cache::forget($this->inviteCacheKey((string) $validated['token']));
@@ -169,6 +175,15 @@ class AdminUserController extends Controller
             ],
             'password' => 'nullable|string|min:8',
             'user_level_id' => ['nullable', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
+            'supplier_id' => 'nullable|integer|exists:tbl_supplier,s_id',
+        ]);
+
+        $nextLevel = array_key_exists('user_level_id', $validated)
+            ? (int) $validated['user_level_id']
+            : (int) $admin->user_level_id;
+        $this->ensureSupplierSelection([
+            'user_level_id' => $nextLevel,
+            'supplier_id' => $validated['supplier_id'] ?? $admin->supplier_id,
         ]);
 
         if (array_key_exists('name', $validated)) {
@@ -182,6 +197,11 @@ class AdminUserController extends Controller
         }
         if (array_key_exists('user_level_id', $validated)) {
             $admin->user_level_id = (int) $validated['user_level_id'];
+        }
+        if (array_key_exists('supplier_id', $validated) || (int) $admin->user_level_id !== 8) {
+            $admin->supplier_id = (int) $admin->user_level_id === 8
+                ? (isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : $admin->supplier_id)
+                : null;
         }
         if (!empty($validated['password'])) {
             $admin->passworde = Hash::make((string) $validated['password']);
@@ -252,6 +272,8 @@ class AdminUserController extends Controller
             'email' => (string) $admin->user_email,
             'user_level_id' => (int) $admin->user_level_id,
             'role' => $this->roleFromLevel((int) $admin->user_level_id),
+            'supplier_id' => $admin->supplier_id ? (int) $admin->supplier_id : null,
+            'supplier_name' => $admin->supplier?->s_company ?: $admin->supplier?->s_name,
         ];
     }
 
@@ -264,6 +286,7 @@ class AdminUserController extends Controller
             'username' => trim((string) $validated['username']),
             'email' => trim((string) $validated['email']),
             'user_level_id' => (int) $validated['user_level_id'],
+            'supplier_id' => isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null,
             'created_by' => $actorId,
             'expires_at' => $expiresAt->toIso8601String(),
         ];
@@ -301,5 +324,25 @@ class AdminUserController extends Controller
     private function roleLabel(int $level): string
     {
         return str_replace('_', ' ', Str::title($this->roleFromLevel($level)));
+    }
+
+    private function ensureSupplierSelection(array $payload): void
+    {
+        $level = (int) ($payload['user_level_id'] ?? 0);
+        $supplierId = $payload['supplier_id'] ?? null;
+
+        if ($level === 8) {
+            if (! $supplierId) {
+                throw ValidationException::withMessages([
+                    'supplier_id' => ['Supplier is required for Supplier Admin accounts.'],
+                ]);
+            }
+
+            if (! Supplier::query()->where('s_id', (int) $supplierId)->exists()) {
+                throw ValidationException::withMessages([
+                    'supplier_id' => ['Selected supplier could not be found.'],
+                ]);
+            }
+        }
     }
 }

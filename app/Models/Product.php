@@ -23,6 +23,7 @@ class Product extends Model
         'pd_supplier',
         'pd_price_srp',
         'pd_price_dp',
+        'pd_price_member',
         'pd_prodpv',
         'pd_qty',
         'pd_weight',
@@ -50,6 +51,7 @@ class Product extends Model
     protected $casts = [
         'pd_price_srp'   => 'float',
         'pd_price_dp'    => 'float',
+        'pd_price_member'=> 'float',
         'pd_prodpv'      => 'float',
         'pd_qty'         => 'float',
         'pd_weight'      => 'integer',

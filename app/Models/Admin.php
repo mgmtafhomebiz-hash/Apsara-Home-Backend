@@ -14,6 +14,7 @@ class Admin extends Authenticatable
 
     protected $fillable = [
         'user_level_id',
+        'supplier_id',
         'username',
         'passworde',
         'user_email',
@@ -21,4 +22,9 @@ class Admin extends Authenticatable
     ];
 
     protected $hidden = ['passworde'];
+
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class, 'supplier_id', 's_id');
+    }
 }
