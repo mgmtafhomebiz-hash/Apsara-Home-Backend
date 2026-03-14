@@ -450,6 +450,12 @@ class AuthController extends Controller
                 Rule::unique('tbl_customer', 'c_username')->ignore($customer->c_userid, 'c_userid'),
             ],
             'phone' => 'nullable|string|max:25',
+            'address' => 'nullable|string|max:500',
+            'barangay' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:255',
+            'province' => 'nullable|string|max:255',
+            'region' => 'nullable|string|max:255',
+            'zip_code' => 'nullable|string|max:20',
             'avatar_url' => 'nullable|url|max:1200',
         ]);
 
@@ -465,6 +471,30 @@ class AuthController extends Controller
 
         if (array_key_exists('phone', $validated) && $validated['phone'] !== null) {
             $customer->c_mobile = $validated['phone'];
+        }
+
+        if (array_key_exists('address', $validated)) {
+            $customer->c_address = $validated['address'] ?: null;
+        }
+
+        if (array_key_exists('barangay', $validated)) {
+            $customer->c_barangay = $validated['barangay'] ?: null;
+        }
+
+        if (array_key_exists('city', $validated)) {
+            $customer->c_city = $validated['city'] ?: null;
+        }
+
+        if (array_key_exists('province', $validated)) {
+            $customer->c_province = $validated['province'] ?: null;
+        }
+
+        if (array_key_exists('region', $validated)) {
+            $customer->c_region = $validated['region'] ?: null;
+        }
+
+        if (array_key_exists('zip_code', $validated)) {
+            $customer->c_zipcode = $validated['zip_code'] ?: null;
         }
 
         if (array_key_exists('avatar_url', $validated)) {
@@ -496,6 +526,12 @@ class AuthController extends Controller
             'email' => $customer->c_email,
             'username' => $customer->c_username,
             'phone' => $customer->c_mobile,
+            'address' => (string) ($customer->c_address ?? ''),
+            'barangay' => (string) ($customer->c_barangay ?? ''),
+            'city' => (string) ($customer->c_city ?? ''),
+            'province' => (string) ($customer->c_province ?? ''),
+            'region' => (string) ($customer->c_region ?? ''),
+            'zip_code' => (string) ($customer->c_zipcode ?? ''),
             'avatar_url' => $customer->c_avatar_url,
             'account_status' => $accountStatus,
             'lock_status' => $lockStatus,

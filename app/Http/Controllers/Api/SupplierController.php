@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
+use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\SupplierUser;
 use Illuminate\Http\Request;
@@ -64,6 +65,80 @@ class SupplierController extends Controller
             'message' => 'Supplier company created successfully.',
             'supplier' => $this->transform($supplier),
         ], 201);
+    }
+
+    public function update(Request $request, int $id)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (! $admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $supplier = Supplier::query()->find($id);
+        if (! $supplier) {
+            return response()->json(['message' => 'Supplier company not found.'], 404);
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'company' => 'required|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'contact' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:255',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        $supplier->fill([
+            's_name' => trim((string) $validated['name']),
+            's_company' => trim((string) $validated['company']),
+            's_email' => trim((string) ($validated['email'] ?? '')),
+            's_contact' => trim((string) ($validated['contact'] ?? '')),
+            's_address' => trim((string) ($validated['address'] ?? '')),
+            's_status' => (int) ($validated['status'] ?? 1),
+        ]);
+        $supplier->save();
+
+        return response()->json([
+            'message' => 'Supplier company updated successfully.',
+            'supplier' => $this->transform($supplier->fresh()),
+        ]);
+    }
+
+    public function destroy(Request $request, int $id)
+    {
+        $admin = $this->resolveAdmin($request);
+        if (! $admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $supplier = Supplier::query()->find($id);
+        if (! $supplier) {
+            return response()->json(['message' => 'Supplier company not found.'], 404);
+        }
+
+        $linkedUserCount = SupplierUser::query()
+            ->where('su_supplier', $supplier->s_id)
+            ->count();
+        if ($linkedUserCount > 0) {
+            return response()->json([
+                'message' => 'This supplier company still has linked supplier login accounts. Remove or reassign those accounts first.',
+            ], 422);
+        }
+
+        $linkedProductCount = Product::query()
+            ->where('pd_supplier', $supplier->s_id)
+            ->count();
+        if ($linkedProductCount > 0) {
+            return response()->json([
+                'message' => 'This supplier company still has linked products. Remove or reassign those products first.',
+            ], 422);
+        }
+
+        $supplier->delete();
+
+        return response()->json([
+            'message' => 'Supplier company deleted successfully.',
+        ]);
     }
 
     private function resolveAdmin(Request $request): ?Admin

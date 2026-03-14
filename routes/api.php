@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\SupplierAuthController;
 use App\Http\Controllers\Api\SupplierUserController;
+use App\Http\Controllers\Api\CustomerAddressController;
 
 
 // Public auth routes
@@ -55,6 +56,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me',      [AuthController::class, 'me']);
     Route::get('/auth/referral-tree', [AuthController::class, 'referralTree']);
     Route::put('/auth/me',      [AuthController::class, 'updateMe']);
+    Route::get('/auth/addresses', [CustomerAddressController::class, 'index']);
+    Route::post('/auth/addresses', [CustomerAddressController::class, 'store']);
+    Route::patch('/auth/addresses/{id}/default', [CustomerAddressController::class, 'setDefault']);
     Route::get('/admin/members', [MemberController::class, 'index']);
     Route::get('/admin/members/stats', [MemberController::class, 'stats']);
     Route::get('/admin/products', [ProductController::class, 'index']);
@@ -64,6 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/admin/categories', [CategoryController::class, 'index']);
     Route::get('/admin/suppliers', [SupplierController::class, 'index']);
     Route::post('/admin/suppliers', [SupplierController::class, 'store']);
+    Route::put('/admin/suppliers/{id}', [SupplierController::class, 'update']);
+    Route::delete('/admin/suppliers/{id}', [SupplierController::class, 'destroy']);
     Route::post('/admin/supplier-users', [SupplierUserController::class, 'store']);
     Route::post('/admin/categories', [CategoryController::class, 'store']);
     Route::put('/admin/categories/{id}', [CategoryController::class, 'update']);

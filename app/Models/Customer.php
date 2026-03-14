@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Customer extends Authenticatable
 {
@@ -28,4 +29,9 @@ class Customer extends Authenticatable
         'c_password_pin',
         'remember_token',
     ];
+
+    public function addresses(): HasMany
+    {
+        return $this->hasMany(CustomerAddress::class, 'a_cid', 'c_userid');
+    }
 }
