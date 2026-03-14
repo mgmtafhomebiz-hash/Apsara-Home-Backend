@@ -13,9 +13,12 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
 use App\Mail\Auth\RegistrationOtpMail;
+use App\Mail\Auth\CustomerPasswordResetMail;
 
 class AuthController extends Controller
 {
+    private const PASSWORD_RESET_TTL_MINUTES = 60;
+
     public function register(Request $request)
     {
         $request->merge([
@@ -239,6 +242,111 @@ class AuthController extends Controller
         return response()->json([
             'user'  => $this->transformCustomer($customer),
             'token' => $token,
+        ]);
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $validated = $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $customer = Customer::query()
+            ->where('c_email', trim((string) $validated['email']))
+            ->first();
+
+        if ($customer) {
+            $token = Str::random(64);
+            $expiresAt = now()->addMinutes(self::PASSWORD_RESET_TTL_MINUTES);
+            $payload = [
+                'customer_id' => (int) $customer->c_userid,
+                'email' => (string) $customer->c_email,
+                'name' => $this->fullName($customer),
+                'expires_at' => $expiresAt->toIso8601String(),
+            ];
+
+            Cache::put($this->passwordResetCacheKey($token), $payload, $expiresAt);
+
+            $resetUrl = sprintf(
+                '%s/reset-password?token=%s',
+                rtrim((string) env('FRONTEND_URL', config('app.url')), '/'),
+                urlencode($token)
+            );
+
+            Mail::mailer('resend')->to($payload['email'])->send(new CustomerPasswordResetMail(
+                name: $payload['name'],
+                email: $payload['email'],
+                resetUrl: $resetUrl,
+                expiresAt: $expiresAt->toDayDateTimeString(),
+            ));
+        }
+
+        return response()->json([
+            'message' => 'If that email exists in our records, a reset link has been sent.',
+        ]);
+    }
+
+    public function showResetToken(string $token)
+    {
+        $payload = Cache::get($this->passwordResetCacheKey($token));
+        if (!is_array($payload)) {
+            return response()->json(['message' => 'Reset link is invalid or expired.'], 404);
+        }
+
+        return response()->json([
+            'reset' => [
+                'email' => (string) $payload['email'],
+                'name' => (string) $payload['name'],
+                'expires_at' => (string) $payload['expires_at'],
+            ],
+        ]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $validated = $request->validate([
+            'token' => 'required|string',
+            'password' => [
+                'required',
+                'string',
+                'min:8',
+                'confirmed',
+                'regex:/[A-Z]/',
+                'regex:/[a-z]/',
+                'regex:/[0-9]/',
+                'regex:/[^A-Za-z0-9]/',
+            ],
+        ], [
+            'password.min' => 'Password must be at least 8 characters.',
+            'password.confirmed' => 'Password confirmation does not match.',
+            'password.regex' => 'Password must include uppercase, lowercase, number, and special character.',
+        ]);
+
+        $payload = Cache::get($this->passwordResetCacheKey((string) $validated['token']));
+        if (!is_array($payload)) {
+            throw ValidationException::withMessages([
+                'token' => ['Reset link is invalid or expired.'],
+            ]);
+        }
+
+        $customer = Customer::query()->where('c_userid', (int) $payload['customer_id'])->first();
+        if (! $customer) {
+            Cache::forget($this->passwordResetCacheKey((string) $validated['token']));
+
+            throw ValidationException::withMessages([
+                'token' => ['Customer account could not be found.'],
+            ]);
+        }
+
+        $plainPassword = (string) $validated['password'];
+        $customer->c_password = Hash::make($plainPassword);
+        $customer->c_password_pin = $plainPassword;
+        $customer->save();
+
+        Cache::forget($this->passwordResetCacheKey((string) $validated['token']));
+
+        return response()->json([
+            'message' => 'Your password has been reset. You may now sign in.',
         ]);
     }
 
@@ -549,6 +657,11 @@ class AuthController extends Controller
     private function registrationOtpCacheKey(string $verificationToken): string
     {
         return "registration_otp:{$verificationToken}";
+    }
+
+    private function passwordResetCacheKey(string $token): string
+    {
+        return "customer_password_reset:{$token}";
     }
 
     private function sendRegistrationOtpEmail(string $email, string $otp): void

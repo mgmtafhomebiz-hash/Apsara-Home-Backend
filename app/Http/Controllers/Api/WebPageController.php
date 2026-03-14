@@ -12,32 +12,24 @@ class WebPageController extends Controller
 {
     public function home(Request $request): JsonResponse
     {
-        $now = now();
+        return response()->json([
+            'home' => $this->buildPublicItems('home'),
+            'banners' => $this->buildPublicItems('banner'),
+            'announcements' => $this->buildPublicItems('announcement'),
+            'generated_at' => now()->toDateTimeString(),
+        ]);
+    }
 
-        $build = function (string $type) use ($now) {
-            return WebPageContent::query()
-                ->where('wpc_type', $type)
-                ->where('wpc_status', true)
-                ->where(function ($query) use ($now) {
-                    $query->whereNull('wpc_start_at')
-                        ->orWhere('wpc_start_at', '<=', $now);
-                })
-                ->where(function ($query) use ($now) {
-                    $query->whereNull('wpc_end_at')
-                        ->orWhere('wpc_end_at', '>=', $now);
-                })
-                ->orderBy('wpc_sort')
-                ->orderByDesc('wpc_id')
-                ->get()
-                ->map(fn (WebPageContent $item) => $this->transform($item))
-                ->values();
-        };
+    public function publicIndex(Request $request, string $type): JsonResponse
+    {
+        $resolvedType = $this->resolveType($type);
+        if (!$resolvedType) {
+            return response()->json(['message' => 'Invalid web page content type.'], 422);
+        }
 
         return response()->json([
-            'home' => $build('home'),
-            'banners' => $build('banner'),
-            'announcements' => $build('announcement'),
-            'generated_at' => $now->toDateTimeString(),
+            'items' => $this->buildPublicItems($resolvedType),
+            'generated_at' => now()->toDateTimeString(),
         ]);
     }
 
@@ -193,8 +185,31 @@ class WebPageController extends Controller
             'home', 'homepage', 'home_page' => 'home',
             'banner', 'banners' => 'banner',
             'announcement', 'announcements' => 'announcement',
+            'assembly', 'assembly-guide', 'assembly-guides', 'assembly_guides' => 'assembly-guides',
             default => null,
         };
+    }
+
+    private function buildPublicItems(string $type)
+    {
+        $now = now();
+
+        return WebPageContent::query()
+            ->where('wpc_type', $type)
+            ->where('wpc_status', true)
+            ->where(function ($query) use ($now) {
+                $query->whereNull('wpc_start_at')
+                    ->orWhere('wpc_start_at', '<=', $now);
+            })
+            ->where(function ($query) use ($now) {
+                $query->whereNull('wpc_end_at')
+                    ->orWhere('wpc_end_at', '>=', $now);
+            })
+            ->orderBy('wpc_sort')
+            ->orderByDesc('wpc_id')
+            ->get()
+            ->map(fn (WebPageContent $item) => $this->transform($item))
+            ->values();
     }
 
     private function validatePayload(Request $request, bool $partial = false): array
@@ -238,4 +253,3 @@ class WebPageController extends Controller
         ];
     }
 }
-

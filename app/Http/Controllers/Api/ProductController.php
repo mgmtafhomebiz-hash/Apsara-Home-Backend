@@ -192,6 +192,7 @@ class ProductController extends Controller
 
         return [
             'id'          => (int)   $p->pd_id,
+            'supplierId'  => (int)   ($p->pd_supplier ?? 0),
             'name'        => (string) ($p->pd_name ?? ''),
             'description'       => $p->pd_description ?? null,
             'specifications'    => $p->pd_specifications ?? null,
@@ -302,6 +303,7 @@ class ProductController extends Controller
         $search  = trim((string) $request->query('q', ''));
         $status  = $request->query('status', '');
         $catId   = $request->query('cat_id', '');
+        $requestedSupplierId = (int) $request->query('supplier_id', 0);
 
         $query = Product::query()
             ->select([
@@ -335,6 +337,15 @@ class ProductController extends Controller
             ->orderByDesc('pd_id');
 
         $this->scopeQueryToActor($query, $admin, $supplierUser);
+
+        if ($supplierUser) {
+            $query->where('pd_supplier', (int) $supplierUser->su_supplier);
+        } elseif ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin') {
+            $supplierId = (int) ($admin->supplier_id ?? 0);
+            $query->where('pd_supplier', $supplierId > 0 ? $supplierId : -1);
+        } elseif ($requestedSupplierId > 0 && $admin) {
+            $query->where('pd_supplier', $requestedSupplierId);
+        }
 
         $paginator = $query->paginate($perPage);
 

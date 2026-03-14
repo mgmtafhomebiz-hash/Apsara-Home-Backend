@@ -15,9 +15,14 @@ class CategoryController extends Controller
     public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->query('q', ''));
+        $supplierId = (int) $request->query('supplier_id', 0);
+        $usedOnly = $request->boolean('used_only', false);
 
         $productCounts = DB::table('tbl_product')
             ->selectRaw('pd_catid as category_id, COUNT(*) as total')
+            ->when($supplierId > 0, function ($query) use ($supplierId) {
+                $query->where('pd_supplier', $supplierId);
+            })
             ->groupBy('pd_catid')
             ->pluck('total', 'category_id');
 
@@ -25,6 +30,10 @@ class CategoryController extends Controller
                 'cat_id', 'cat_name', 'cat_description',
                 'cat_url', 'cat_image', 'cat_order',
             ])
+            ->when($usedOnly && $supplierId > 0, function ($query) use ($productCounts) {
+                $categoryIds = collect($productCounts)->keys()->map(fn ($id) => (int) $id)->all();
+                $query->whereIn('cat_id', !empty($categoryIds) ? $categoryIds : [-1]);
+            })
             ->when($search !== '', function ($q) use ($search) {
                 $like = '%' . $search . '%';
                 $q->where(function ($inner) use ($like) {

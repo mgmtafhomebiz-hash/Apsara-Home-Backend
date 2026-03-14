@@ -28,6 +28,9 @@ Route::prefix('auth')->group(function () {
     Route::post('/register/verify-otp', [AuthController::class, 'verifyRegistrationOtp']);
     Route::post('/register/resend-otp', [AuthController::class, 'resendRegistrationOtp']);
     Route::post('/login',    [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::get('/reset-password/{token}', [AuthController::class, 'showResetToken']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
 Route::post('/payments/checkout-session', [PaymentController::class, 'createCheckoutSession']);
@@ -39,6 +42,7 @@ Route::get('/products/slug/{slug}', [ProductController::class, 'showBySlug']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/web-pages/home', [WebPageController::class, 'home']);
+Route::get('/web-pages/{type}', [WebPageController::class, 'publicIndex']);
 Route::get('/address/regions', [AddressController::class, 'regions']);
 Route::get('/address/provinces', [AddressController::class, 'provinces']);
 Route::get('/address/cities', [AddressController::class, 'cities']);
