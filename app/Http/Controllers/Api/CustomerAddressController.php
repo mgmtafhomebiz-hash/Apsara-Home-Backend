@@ -128,14 +128,6 @@ class CustomerAddressController extends Controller
 
     private function ensurePrimaryAddressExists(Customer $customer): void
     {
-        $existing = CustomerAddress::query()
-            ->where('a_cid', (int) $customer->c_userid)
-            ->exists();
-
-        if ($existing) {
-            return;
-        }
-
         $street = trim((string) ($customer->c_address ?? ''));
         $region = trim((string) ($customer->c_region ?? ''));
         $province = trim((string) ($customer->c_province ?? ''));
@@ -145,6 +137,25 @@ class CustomerAddressController extends Controller
         if ($street === '' || $region === '' || $province === '' || $city === '' || $barangay === '') {
             return;
         }
+
+        $exists = CustomerAddress::query()
+            ->where('a_cid', (int) $customer->c_userid)
+            ->where('a_address', $street)
+            ->where('a_region', $region)
+            ->where('a_province', $province)
+            ->where('a_city', $city)
+            ->where('a_barangay', $barangay)
+            ->where('a_postcode', (string) ($customer->c_zipcode ?? '') ?: null)
+            ->exists();
+
+        if ($exists) {
+            return;
+        }
+
+        $hasDefault = CustomerAddress::query()
+            ->where('a_cid', (int) $customer->c_userid)
+            ->where('a_shipping_status', 1)
+            ->exists();
 
         CustomerAddress::create([
             'a_cid' => (int) $customer->c_userid,
@@ -161,8 +172,8 @@ class CustomerAddressController extends Controller
             'a_province_code' => (string) ($customer->c_province_code ?? '') ?: null,
             'a_city_code' => (string) ($customer->c_city_code ?? '') ?: null,
             'a_barangay_code' => (string) ($customer->c_barangay_code ?? '') ?: null,
-            'a_shipping_status' => 1,
-            'a_billing_status' => 1,
+            'a_shipping_status' => $hasDefault ? 0 : 1,
+            'a_billing_status' => $hasDefault ? 0 : 1,
             'a_postcode' => (string) ($customer->c_zipcode ?? '') ?: null,
             'a_address_type' => 'Home',
             'a_notes' => '',

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerAddress;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
@@ -169,6 +170,8 @@ class AuthController extends Controller
             'c_region'       => $registration['region'] ?? null,
             'c_zipcode'      => $registration['zip_code'] ?? null,
         ]);
+
+        $this->createPrimaryAddressRecord($customer);
 
         Cache::forget($this->registrationOtpCacheKey($validated['verification_token']));
 
@@ -605,6 +608,55 @@ class AuthController extends Controller
         $middle = implode(' ', $parts);
 
         return [$first ?? '', $middle !== '' ? $middle : null, $last ?? null];
+    }
+
+    private function createPrimaryAddressRecord(Customer $customer): void
+    {
+        $street = trim((string) ($customer->c_address ?? ''));
+        $region = trim((string) ($customer->c_region ?? ''));
+        $province = trim((string) ($customer->c_province ?? ''));
+        $city = trim((string) ($customer->c_city ?? ''));
+        $barangay = trim((string) ($customer->c_barangay ?? ''));
+
+        if ($street === '' || $region === '' || $province === '' || $city === '' || $barangay === '') {
+            return;
+        }
+
+        $existing = CustomerAddress::query()
+            ->where('a_cid', (int) $customer->c_userid)
+            ->where('a_address', $street)
+            ->where('a_region', $region)
+            ->where('a_province', $province)
+            ->where('a_city', $city)
+            ->where('a_barangay', $barangay)
+            ->where('a_postcode', (string) ($customer->c_zipcode ?? '') ?: null)
+            ->exists();
+
+        if ($existing) {
+            return;
+        }
+
+        CustomerAddress::create([
+            'a_cid' => (int) $customer->c_userid,
+            'a_fullname' => $this->fullName($customer),
+            'a_mobile' => (string) ($customer->c_mobile ?? '0'),
+            'a_mobile_code' => '0',
+            'a_address' => $street,
+            'a_country' => (string) ($customer->c_country ?? '175'),
+            'a_region' => $region,
+            'a_province' => $province,
+            'a_city' => $city,
+            'a_barangay' => $barangay,
+            'a_region_code' => (string) ($customer->c_region_code ?? '') ?: null,
+            'a_province_code' => (string) ($customer->c_province_code ?? '') ?: null,
+            'a_city_code' => (string) ($customer->c_city_code ?? '') ?: null,
+            'a_barangay_code' => (string) ($customer->c_barangay_code ?? '') ?: null,
+            'a_shipping_status' => 1,
+            'a_billing_status' => 1,
+            'a_postcode' => (string) ($customer->c_zipcode ?? '') ?: null,
+            'a_address_type' => 'Home',
+            'a_notes' => '',
+        ]);
     }
 
     private function mapRole(int $level): string
