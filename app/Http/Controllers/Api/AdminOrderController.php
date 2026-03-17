@@ -10,6 +10,7 @@ use App\Models\AdminNotificationRead;
 use App\Models\CheckoutHistory;
 use App\Models\Customer;
 use App\Models\CustomerWalletLedger;
+use App\Services\Shipping\JntShippingService;
 use App\Services\Shipping\XdeShippingService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -22,7 +23,10 @@ use RuntimeException;
 
 class AdminOrderController extends Controller
 {
-    public function __construct(private readonly XdeShippingService $xdeShippingService)
+    public function __construct(
+        private readonly XdeShippingService $xdeShippingService,
+        private readonly JntShippingService $jntShippingService
+    )
     {
     }
 
@@ -448,7 +452,7 @@ class AdminOrderController extends Controller
         $previousStatus = (string) ($order->ch_fulfillment_status ?? 'pending');
         $order->ch_fulfillment_status = $validated['status'];
         $order->save();
-        $shippingResult = $this->bookXdeShipmentOnShipped($order, (string) $validated['status']);
+        $shippingResult = $this->bookShipmentOnShipped($order, (string) $validated['status']);
 
         if ($previousStatus !== (string) $order->ch_fulfillment_status) {
             $this->sendCustomerOrderStatusEmail($order, 'fulfillment_status');
@@ -456,9 +460,11 @@ class AdminOrderController extends Controller
 
         $message = 'Order status updated.';
         if (($shippingResult['state'] ?? '') === 'booked') {
-            $message = 'Order status updated. XDE shipment booked.';
+            $label = strtoupper((string) ($shippingResult['courier'] ?? 'courier'));
+            $message = "Order status updated. {$label} shipment booked.";
         } elseif (($shippingResult['state'] ?? '') === 'failed') {
-            $message = 'Order status updated. XDE booking failed.';
+            $label = strtoupper((string) ($shippingResult['courier'] ?? 'courier'));
+            $message = "Order status updated. {$label} booking failed.";
         }
 
         return response()->json([
@@ -479,6 +485,7 @@ class AdminOrderController extends Controller
 
         $validated = $request->validate([
             'shipment_status' => 'required|in:for_pickup,picked_up,in_transit,out_for_delivery,delivered,failed_delivery,returned_to_sender',
+            'courier' => 'nullable|in:jnt,xde',
         ]);
 
         $order = CheckoutHistory::query()->where('ch_id', $id)->firstOrFail();
@@ -488,7 +495,12 @@ class AdminOrderController extends Controller
 
         $shipmentStatus = (string) $validated['shipment_status'];
         $previousShipmentStatus = (string) ($order->ch_shipment_status ?? '');
-        $order->ch_courier = $order->ch_courier ?: 'xde';
+        $selectedCourier = $this->normalizeCourier($validated['courier'] ?? null);
+        if ($selectedCourier !== null) {
+            $order->ch_courier = $selectedCourier;
+        } elseif (!$this->normalizeCourier($order->ch_courier)) {
+            $order->ch_courier = $this->defaultCourier();
+        }
         $order->ch_shipment_status = $shipmentStatus;
 
         if (in_array($shipmentStatus, ['picked_up', 'in_transit', 'for_pickup'], true)) {
@@ -518,27 +530,31 @@ class AdminOrderController extends Controller
         ]);
     }
 
-    private function bookXdeShipmentOnShipped(CheckoutHistory $order, string $status): array
+    private function bookShipmentOnShipped(CheckoutHistory $order, string $status): array
     {
         if ($status !== 'shipped') {
             return ['state' => 'skipped', 'reason' => 'status_not_shipped'];
         }
 
-        $hasConfig = (string) config('services.xde.base_url', '') !== ''
-            && (string) config('services.xde.api_key', '') !== ''
-            && (string) config('services.xde.token', '') !== '';
-        if (!$hasConfig) {
-            return ['state' => 'skipped', 'reason' => 'xde_not_configured'];
+        $courier = $this->normalizeCourier($order->ch_courier) ?? $this->defaultCourier();
+        if ($courier === null) {
+            return ['state' => 'skipped', 'reason' => 'no_courier_configured'];
         }
 
-        if (!empty($order->ch_tracking_no) && strtolower((string) $order->ch_courier) === 'xde') {
+        if (!empty($order->ch_tracking_no) && strtolower((string) $order->ch_courier) === $courier) {
             return [
                 'state' => 'skipped',
                 'reason' => 'already_booked',
+                'courier' => $courier,
                 'tracking_no' => (string) $order->ch_tracking_no,
             ];
         }
 
+        return $this->bookCourierShipment($order, $courier);
+    }
+
+    private function bookCourierShipment(CheckoutHistory $order, string $courier): array
+    {
         $payload = [
             'reference_no' => (string) ($order->ch_checkout_id ?? ''),
             'recipient_name' => (string) ($order->ch_customer_name ?? ''),
@@ -554,11 +570,14 @@ class AdminOrderController extends Controller
         ];
 
         try {
-            $response = $this->xdeShippingService->bookShipment($payload);
+            $response = match ($courier) {
+                'jnt' => $this->jntShippingService->bookShipment($payload),
+                default => $this->xdeShippingService->bookShipment($payload),
+            };
             $trackingNo = $this->extractTrackingNoFromShipment($response);
             $shipmentStatus = $this->extractShipmentStatus($response);
 
-            $order->ch_courier = 'xde';
+            $order->ch_courier = $courier;
             if ($trackingNo !== null) {
                 $order->ch_tracking_no = $trackingNo;
             }
@@ -573,22 +592,51 @@ class AdminOrderController extends Controller
 
             return [
                 'state' => 'booked',
+                'courier' => $courier,
                 'tracking_no' => $order->ch_tracking_no,
                 'shipment_status' => $order->ch_shipment_status,
             ];
         } catch (RuntimeException $e) {
-            Log::warning('XDE auto-booking failed on shipped status update.', [
+            Log::warning('Courier auto-booking failed on shipped status update.', [
                 'order_id' => (int) $order->ch_id,
                 'checkout_id' => (string) $order->ch_checkout_id,
+                'courier' => $courier,
                 'error' => $e->getMessage(),
             ]);
 
             return [
                 'state' => 'failed',
-                'reason' => 'xde_book_failed',
+                'courier' => $courier,
+                'reason' => $courier . '_book_failed',
                 'error' => $e->getMessage(),
             ];
         }
+    }
+
+    private function normalizeCourier(mixed $courier): ?string
+    {
+        $normalized = strtolower(trim((string) $courier));
+        return in_array($normalized, ['jnt', 'xde'], true) ? $normalized : null;
+    }
+
+    private function defaultCourier(): ?string
+    {
+        if ($this->hasCourierConfig('jnt')) {
+            return 'jnt';
+        }
+
+        if ($this->hasCourierConfig('xde')) {
+            return 'xde';
+        }
+
+        return null;
+    }
+
+    private function hasCourierConfig(string $courier): bool
+    {
+        return (string) config("services.{$courier}.base_url", '') !== ''
+            && (string) config("services.{$courier}.api_key", '') !== ''
+            && (string) config("services.{$courier}.token", '') !== '';
     }
 
     private function extractTrackingNoFromShipment(array $response): ?string

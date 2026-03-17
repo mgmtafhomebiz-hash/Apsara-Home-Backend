@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\AdminMemberKycController;
 use App\Http\Controllers\Api\CustomerNotificationController;
 use App\Http\Controllers\Api\WishlistController;
 use App\Http\Controllers\Api\WebPageController;
+use App\Http\Controllers\Api\JntShippingController;
 use App\Http\Controllers\Api\XdeShippingController;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\SupplierController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Api\SupplierAuthController;
 use App\Http\Controllers\Api\SupplierUserController;
 use App\Http\Controllers\Api\CustomerAddressController;
 use App\Http\Controllers\Api\InteriorRequestController;
+use App\Http\Controllers\Api\JntWebhookController;
 
 
 // Public auth routes
@@ -50,6 +52,10 @@ Route::get('/address/regions', [AddressController::class, 'regions']);
 Route::get('/address/provinces', [AddressController::class, 'provinces']);
 Route::get('/address/cities', [AddressController::class, 'cities']);
 Route::get('/address/barangays', [AddressController::class, 'barangays']);
+Route::match(['GET', 'POST'], '/jnt/sandbox/logistics-trackback', [JntWebhookController::class, 'sandboxLogisticsTrackback']);
+Route::match(['GET', 'POST'], '/jnt/sandbox/order-status', [JntWebhookController::class, 'sandboxOrderStatus']);
+Route::match(['GET', 'POST'], '/jnt/webhook/logistics-trackback', [JntWebhookController::class, 'productionLogisticsTrackback']);
+Route::match(['GET', 'POST'], '/jnt/webhook/order-status', [JntWebhookController::class, 'productionOrderStatus']);
 
 
 // Protected routes (requires Sanctum token)
@@ -103,6 +109,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/admin/orders/{id}/shipping/xde/book', [XdeShippingController::class, 'bookForOrder']);
     Route::get('/admin/orders/{id}/shipping/xde/track', [XdeShippingController::class, 'trackByOrder']);
     Route::get('/admin/shipping/xde/track/{trackingNo}', [XdeShippingController::class, 'trackByTrackingNo']);
+    Route::post('/admin/orders/{id}/shipping/jnt/book', [JntShippingController::class, 'bookForOrder']);
+    Route::get('/admin/orders/{id}/shipping/jnt/track', [JntShippingController::class, 'trackByOrder']);
+    Route::get('/admin/shipping/jnt/track/{trackingNo}', [JntShippingController::class, 'trackByTrackingNo']);
     Route::get('/admin/encashment', [AdminEncashmentController::class, 'index']);
     Route::patch('/admin/encashment/{id}/approve', [AdminEncashmentController::class, 'approve']);
     Route::patch('/admin/encashment/{id}/reject', [AdminEncashmentController::class, 'reject']);

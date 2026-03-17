@@ -39,7 +39,7 @@ class CustomerAddressController extends Controller
             'phone' => 'required|string|max:25',
             'address' => 'required|string|max:255',
             'region' => 'required|string|max:35',
-            'province' => 'required|string|max:45',
+            'province' => 'nullable|string|max:45',
             'city' => 'required|string|max:55',
             'barangay' => 'required|string|max:55',
             'zip_code' => 'nullable|string|max:10',
@@ -71,7 +71,7 @@ class CustomerAddressController extends Controller
             'a_address' => trim((string) $validated['address']),
             'a_country' => '175',
             'a_region' => trim((string) $validated['region']),
-            'a_province' => trim((string) $validated['province']),
+            'a_province' => trim((string) ($validated['province'] ?? $validated['region'])),
             'a_city' => trim((string) $validated['city']),
             'a_barangay' => trim((string) $validated['barangay']),
             'a_region_code' => null,
@@ -130,23 +130,32 @@ class CustomerAddressController extends Controller
     {
         $street = trim((string) ($customer->c_address ?? ''));
         $region = trim((string) ($customer->c_region ?? ''));
-        $province = trim((string) ($customer->c_province ?? ''));
+        $province = trim((string) ($customer->c_province ?? $customer->c_region ?? ''));
         $city = trim((string) ($customer->c_city ?? ''));
         $barangay = trim((string) ($customer->c_barangay ?? ''));
 
-        if ($street === '' || $region === '' || $province === '' || $city === '' || $barangay === '') {
+        if ($street === '') {
             return;
         }
 
-        $exists = CustomerAddress::query()
+        $query = CustomerAddress::query()
             ->where('a_cid', (int) $customer->c_userid)
-            ->where('a_address', $street)
-            ->where('a_region', $region)
-            ->where('a_province', $province)
-            ->where('a_city', $city)
-            ->where('a_barangay', $barangay)
-            ->where('a_postcode', (string) ($customer->c_zipcode ?? '') ?: null)
-            ->exists();
+            ->where('a_address', $street);
+
+        if ($region !== '') {
+            $query->where('a_region', $region);
+        }
+        if ($province !== '') {
+            $query->where('a_province', $province);
+        }
+        if ($city !== '') {
+            $query->where('a_city', $city);
+        }
+        if ($barangay !== '') {
+            $query->where('a_barangay', $barangay);
+        }
+
+        $exists = $query->exists();
 
         if ($exists) {
             return;
