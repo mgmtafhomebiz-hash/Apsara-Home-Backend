@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CheckoutHistory;
 use App\Models\Customer;
+use App\Models\CustomerNotification;
 use App\Models\CustomerVerificationRequest;
 use App\Models\EncashmentRequest;
 use Illuminate\Http\Request;
@@ -140,7 +141,34 @@ class CustomerNotificationController extends Controller
             ],
         ];
 
-        $unreadCount = $shippingUpdatesCount + $encashmentUpdatesCount + $recentReferralCount + $kycActionCount;
+        $storedItems = CustomerNotification::query()
+            ->where('cn_customer_id', $customerId)
+            ->orderByDesc('cn_created_at')
+            ->orderByDesc('cn_id')
+            ->limit(25)
+            ->get()
+            ->map(function (CustomerNotification $notification) {
+                return [
+                    'id' => 'customer_notification:' . (int) $notification->cn_id,
+                    'title' => (string) ($notification->cn_title ?? 'Account Update'),
+                    'description' => (string) ($notification->cn_message ?? ''),
+                    'count' => 1,
+                    'severity' => (string) ($notification->cn_severity ?? 'info'),
+                    'href' => (string) ($notification->cn_href ?? '/profile'),
+                    'latest_at' => optional($notification->cn_created_at)->toDateTimeString(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $items = collect(array_merge($storedItems, $items))
+            ->sortByDesc(function (array $item) {
+                return $item['latest_at'] ? strtotime((string) $item['latest_at']) : 0;
+            })
+            ->values()
+            ->all();
+
+        $unreadCount = count($storedItems) + $shippingUpdatesCount + $encashmentUpdatesCount + $recentReferralCount + $kycActionCount;
 
         return response()->json([
             'unread_count' => $unreadCount,

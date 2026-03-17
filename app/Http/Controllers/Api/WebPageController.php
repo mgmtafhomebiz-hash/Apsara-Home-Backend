@@ -186,6 +186,7 @@ class WebPageController extends Controller
             'banner', 'banners' => 'banner',
             'announcement', 'announcements' => 'announcement',
             'assembly', 'assembly-guide', 'assembly-guides', 'assembly_guides' => 'assembly-guides',
+            'shop-builder', 'shop_builder', 'shop', 'shop-page', 'shop_page' => 'shop-builder',
             default => null,
         };
     }

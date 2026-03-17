@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\SupplierAuthController;
 use App\Http\Controllers\Api\SupplierUserController;
 use App\Http\Controllers\Api\CustomerAddressController;
+use App\Http\Controllers\Api\InteriorRequestController;
 
 
 // Public auth routes
@@ -84,6 +85,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/encashment/vouchers', [EncashmentController::class, 'createAffiliateVoucher']);
     Route::post('/encashment/verification-request', [EncashmentController::class, 'submitVerificationRequest']);
     Route::get('/notifications/customer', [CustomerNotificationController::class, 'index']);
+    Route::post('/interior-requests', [InteriorRequestController::class, 'store']);
+    Route::get('/interior-requests', [InteriorRequestController::class, 'myRequests']);
+    Route::get('/interior-requests/{id}', [InteriorRequestController::class, 'show']);
+    Route::get('/admin/interior-requests', [InteriorRequestController::class, 'adminIndex']);
+    Route::patch('/admin/interior-requests/{id}', [InteriorRequestController::class, 'adminUpdate']);
+    Route::post('/admin/interior-requests/{id}/updates', [InteriorRequestController::class, 'adminStoreUpdate']);
     Route::get('/admin/orders', [AdminOrderController::class, 'index']);
     Route::get('/admin/orders/notifications', [AdminOrderController::class, 'notifications']);
     Route::post('/admin/orders/notifications/read-all', [AdminOrderController::class, 'markAllNotificationsRead']);

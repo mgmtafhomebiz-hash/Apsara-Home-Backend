@@ -137,6 +137,17 @@ class ProductController extends Controller
 
     private function syncVariants(Product $product, array $variants, \DateTimeInterface $now): void
     {
+        $existingVariantIds = ProductVariant::query()
+            ->where('pv_pdid', $product->pd_id)
+            ->pluck('pv_id')
+            ->all();
+
+        if (!empty($existingVariantIds)) {
+            ProductVariantPhoto::query()
+                ->whereIn('pvp_pvid', $existingVariantIds)
+                ->delete();
+        }
+
         ProductVariant::query()->where('pv_pdid', $product->pd_id)->delete();
 
         foreach ($variants as $index => $variant) {
@@ -707,10 +718,11 @@ class ProductController extends Controller
                     $product->pd_image = $request->pd_image;
                 }
 
-                $shouldSyncVariants = $request->has('pd_variants')
+                $shouldSyncVariants = $request->exists('pd_variants')
                     && (
                         $request->input('pd_type', $product->pd_type) == 1
                         || !empty($request->input('pd_variants', []))
+                        || $request->input('pd_type', $product->pd_type) == 0
                     );
 
                 if ($shouldSyncVariants) {
