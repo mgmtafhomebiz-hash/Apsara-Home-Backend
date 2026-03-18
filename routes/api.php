@@ -64,6 +64,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me',      [AuthController::class, 'me']);
     Route::get('/auth/referral-tree', [AuthController::class, 'referralTree']);
     Route::put('/auth/me',      [AuthController::class, 'updateMe']);
+    Route::patch('/auth/change-password', [AuthController::class, 'changePassword']);
     Route::get('/auth/addresses', [CustomerAddressController::class, 'index']);
     Route::post('/auth/addresses', [CustomerAddressController::class, 'store']);
     Route::patch('/auth/addresses/{id}/default', [CustomerAddressController::class, 'setDefault']);

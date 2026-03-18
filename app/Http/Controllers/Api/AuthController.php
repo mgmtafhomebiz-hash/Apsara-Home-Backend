@@ -230,14 +230,28 @@ class AuthController extends Controller
         }
 
         $password = (string) $request->password;
-        $hashMatch = Hash::check($password, (string) $customer->c_password);
-        $legacyDirectMatch = hash_equals((string) $customer->c_password, $password);
+        $storedPassword = (string) ($customer->c_password ?? '');
+        $hashMatch = $storedPassword !== '' && password_get_info($storedPassword)['algo'] !== null
+            ? Hash::check($password, $storedPassword)
+            : false;
+        $legacyDirectMatch = $this->matchesLegacyCustomerPassword($customer, $password, false);
+        $legacyCaseInsensitiveMatch = $this->matchesLegacyCustomerPassword($customer, $password, true);
         $pinMatch = hash_equals((string) $customer->c_password_pin, $password);
 
-        if (! $hashMatch && ! $legacyDirectMatch && ! $pinMatch) {
+        if (! $hashMatch && ! $legacyDirectMatch && ! $legacyCaseInsensitiveMatch && ! $pinMatch) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
+        }
+
+        $mustChangePassword = $this->customerRequiresPasswordChange($customer)
+            || $legacyDirectMatch
+            || $legacyCaseInsensitiveMatch
+            || ! $this->passwordMeetsModernRequirements($password);
+
+        if ($mustChangePassword && ! $this->customerRequiresPasswordChange($customer)) {
+            $customer->c_password_change_required = true;
+            $customer->save();
         }
 
         $token = $customer->createToken('auth_token')->plainTextToken;
@@ -245,6 +259,9 @@ class AuthController extends Controller
         return response()->json([
             'user'  => $this->transformCustomer($customer),
             'token' => $token,
+            'message' => $mustChangePassword
+                ? 'Your account was signed in using a legacy password. Please change your password before continuing to the shop.'
+                : null,
         ]);
     }
 
@@ -509,6 +526,57 @@ class AuthController extends Controller
         return response()->json($this->transformCustomer($customer));
     }
 
+    public function changePassword(Request $request)
+    {
+        /** @var Customer $customer */
+        $customer = $request->user();
+        $passwordChangeRequired = $this->customerRequiresPasswordChange($customer);
+
+        $validated = $request->validate([
+            'current_password' => $passwordChangeRequired ? 'nullable|string' : 'required|string',
+            'new_password' => [
+                'required',
+                'string',
+                'min:8',
+                'confirmed',
+                'regex:/[A-Z]/',
+                'regex:/[a-z]/',
+                'regex:/[0-9]/',
+                'regex:/[^A-Za-z0-9]/',
+            ],
+        ], [
+            'new_password.min' => 'Password must be at least 8 characters.',
+            'new_password.confirmed' => 'Password confirmation does not match.',
+            'new_password.regex' => 'Password must include uppercase, lowercase, number, and special character.',
+        ]);
+
+        $currentPassword = (string) ($validated['current_password'] ?? '');
+        if (! $passwordChangeRequired) {
+            if (! $this->matchesAnyCustomerPassword($customer, $currentPassword)) {
+                throw ValidationException::withMessages([
+                    'current_password' => ['Your current password is incorrect.'],
+                ]);
+            }
+        }
+
+        $newPassword = (string) $validated['new_password'];
+        if ($this->matchesAnyCustomerPassword($customer, $newPassword)) {
+            throw ValidationException::withMessages([
+                'new_password' => ['New password must be different from your current password.'],
+            ]);
+        }
+
+        $customer->c_password = Hash::make($newPassword);
+        $customer->c_password_pin = $newPassword;
+        $customer->c_password_change_required = false;
+        $customer->save();
+
+        return response()->json([
+            'message' => 'Your password has been updated successfully.',
+            'user' => $this->transformCustomer($customer),
+        ]);
+    }
+
     private function transformCustomer(Customer $customer): array
     {
         $fullName = $this->fullName($customer);
@@ -536,11 +604,60 @@ class AuthController extends Controller
             'region' => (string) ($customer->c_region ?? ''),
             'zip_code' => (string) ($customer->c_zipcode ?? ''),
             'avatar_url' => $customer->c_avatar_url,
+            'rank' => (int) ($customer->c_rank ?? 0),
             'account_status' => $accountStatus,
             'lock_status' => $lockStatus,
             'verification_status' => $verificationStatus,
             'email_verified' => true,
+            'password_change_required' => $this->customerRequiresPasswordChange($customer),
         ];
+    }
+
+    private function customerRequiresPasswordChange(Customer $customer): bool
+    {
+        return (bool) ($customer->c_password_change_required ?? false);
+    }
+
+    private function customerUsesLegacyPlainPassword(Customer $customer): bool
+    {
+        $stored = (string) ($customer->c_password ?? '');
+        return $stored !== '' && password_get_info($stored)['algo'] === null;
+    }
+
+    private function matchesLegacyCustomerPassword(Customer $customer, string $password, bool $ignoreCase): bool
+    {
+        if (! $this->customerUsesLegacyPlainPassword($customer)) {
+            return false;
+        }
+
+        $stored = (string) $customer->c_password;
+        if (! $ignoreCase) {
+            return hash_equals($stored, $password);
+        }
+
+        return mb_strtolower($stored, 'UTF-8') === mb_strtolower($password, 'UTF-8');
+    }
+
+    private function matchesAnyCustomerPassword(Customer $customer, string $password): bool
+    {
+        $stored = (string) ($customer->c_password ?? '');
+        $hashMatch = $stored !== '' && password_get_info($stored)['algo'] !== null
+            ? Hash::check($password, $stored)
+            : false;
+
+        return $hashMatch
+            || $this->matchesLegacyCustomerPassword($customer, $password, false)
+            || $this->matchesLegacyCustomerPassword($customer, $password, true)
+            || hash_equals((string) ($customer->c_password_pin ?? ''), $password);
+    }
+
+    private function passwordMeetsModernRequirements(string $password): bool
+    {
+        return strlen($password) >= 8
+            && preg_match('/[A-Z]/', $password) === 1
+            && preg_match('/[a-z]/', $password) === 1
+            && preg_match('/[0-9]/', $password) === 1
+            && preg_match('/[^A-Za-z0-9]/', $password) === 1;
     }
 
     private function transformReferralNode(Customer $customer): array
