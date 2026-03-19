@@ -374,6 +374,10 @@ class PaymentController extends Controller
                     'shipping_fee' => 0,
                     'payment_method' => $this->formatPaymentMethod((string) $order->ch_payment_method),
                     'shipping_address' => $order->ch_customer_address ?: 'No address provided',
+                    'courier' => $order->ch_courier ?: null,
+                    'tracking_no' => $order->ch_tracking_no ?: null,
+                    'shipment_status' => $order->ch_shipment_status ?: null,
+                    'shipped_at' => optional($order->ch_shipped_at)->toDateTimeString(),
                     'created_at' => optional($order->ch_paid_at ?? $order->created_at)->toDateTimeString(),
                     'estimated_delivery' => null,
                 ];

@@ -109,6 +109,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/admin/orders/{id}/shipment-status', [AdminOrderController::class, 'updateShipmentStatus']);
     Route::post('/admin/orders/{id}/shipping/xde/book', [XdeShippingController::class, 'bookForOrder']);
     Route::get('/admin/orders/{id}/shipping/xde/track', [XdeShippingController::class, 'trackByOrder']);
+    Route::get('/admin/orders/{id}/shipping/xde/waybill', [XdeShippingController::class, 'waybillByOrder']);
+    Route::post('/admin/orders/{id}/shipping/xde/cancel', [XdeShippingController::class, 'cancelByOrder']);
+    Route::get('/admin/orders/{id}/shipping/xde/epod', [XdeShippingController::class, 'epodByOrder']);
     Route::get('/admin/shipping/xde/track/{trackingNo}', [XdeShippingController::class, 'trackByTrackingNo']);
     Route::post('/admin/orders/{id}/shipping/jnt/book', [JntShippingController::class, 'bookForOrder']);
     Route::get('/admin/orders/{id}/shipping/jnt/track', [JntShippingController::class, 'trackByOrder']);

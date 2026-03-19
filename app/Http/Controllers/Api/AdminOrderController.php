@@ -496,7 +496,7 @@ class AdminOrderController extends Controller
         }
 
         $validated = $request->validate([
-            'shipment_status' => 'required|in:for_pickup,picked_up,in_transit,out_for_delivery,delivered,failed_delivery,returned_to_sender',
+            'shipment_status' => 'required|in:for_pickup,picked_up,in_transit,out_for_delivery,delivered,failed_delivery,returned_to_sender,cancelled',
             'courier' => 'nullable|in:jnt,xde',
         ]);
 
@@ -1022,6 +1022,7 @@ class AdminOrderController extends Controller
                 'in_transit' => ['Shipment In Transit', 'Your package is currently in transit.', 'background:#ede9fe;color:#6d28d9;', 'The next update should be once your parcel is out for delivery.'],
                 'out_for_delivery' => ['Shipment Out for Delivery', 'Your package is with the courier and arriving soon.', 'background:#ffedd5;color:#c2410c;', 'Please be ready to receive the order today if delivery is successful.'],
                 'delivered' => ['Shipment Delivered', 'The courier marked your shipment as delivered.', 'background:#dcfce7;color:#15803d;', 'If you have any concern about the received items, contact AF Home support.'],
+                'cancelled' => ['Shipment Cancelled', 'The courier booking for your shipment has been cancelled.', 'background:#fee2e2;color:#b91c1c;', 'Please contact AF Home support if you need the order rebooked or reviewed.'],
                 'failed_delivery' => ['Delivery Attempt Failed', 'The courier was not able to complete the delivery attempt.', 'background:#fee2e2;color:#b91c1c;', 'Please wait for the next courier instruction or contact support for help.'],
                 'returned_to_sender' => ['Shipment Returned', 'The shipment was returned to sender.', 'background:#e5e7eb;color:#374151;', 'Please contact AF Home support so the order can be reviewed with you.'],
                 default => ['Shipment Update', 'There is a new courier update for your order.', 'background:#fef3c7;color:#92400e;', 'You can check your latest tracking details using your order reference.'],
