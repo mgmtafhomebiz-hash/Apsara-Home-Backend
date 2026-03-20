@@ -163,7 +163,7 @@ class PaymentController extends Controller
         }
 
         $attrs = $res->json('data.attributes');
-        $status = $this->normalizeCheckoutStatusForStorage($attrs['status'] ?? null);
+        $status = $this->resolveCheckoutStatusForStorage(is_array($attrs) ? $attrs : []);
         $attrs['status'] = $status;
 
         Log::info('Checkout verify response received', [
@@ -423,7 +423,7 @@ class PaymentController extends Controller
 
     private function persistCheckoutHistoryIfNeeded(string $checkoutId, array $attrs): void
     {
-        $normalizedIncomingStatus = $this->normalizeCheckoutStatusForStorage($attrs['status'] ?? null);
+        $normalizedIncomingStatus = $this->resolveCheckoutStatusForStorage($attrs);
         $attrs['status'] = $normalizedIncomingStatus;
 
         $cached = Cache::get("checkout_customer:{$checkoutId}");
@@ -607,6 +607,60 @@ class PaymentController extends Controller
         }
 
         return $normalized;
+    }
+
+    private function resolveCheckoutStatusForStorage(array $attrs): string
+    {
+        $normalizedStatus = $this->normalizeCheckoutStatusForStorage($attrs['status'] ?? null);
+
+        if ($this->isPaidStatus($normalizedStatus)) {
+            return 'paid';
+        }
+
+        $paymentStatuses = array_filter([
+            data_get($attrs, 'payment_intent.status'),
+            data_get($attrs, 'payment_intent.attributes.status'),
+            data_get($attrs, 'payment_intent.data.attributes.status'),
+            data_get($attrs, 'payment.status'),
+            data_get($attrs, 'payment.attributes.status'),
+            ...$this->extractPaymentStatuses(data_get($attrs, 'payments')),
+        ], static fn ($value) => is_string($value) && trim($value) !== '');
+
+        foreach ($paymentStatuses as $paymentStatus) {
+            if ($this->isPaidStatus($paymentStatus)) {
+                return 'paid';
+            }
+        }
+
+        return $normalizedStatus;
+    }
+
+    private function extractPaymentStatuses(mixed $payments): array
+    {
+        if (!is_array($payments)) {
+            return [];
+        }
+
+        $statuses = [];
+        foreach ($payments as $payment) {
+            if (!is_array($payment)) {
+                continue;
+            }
+
+            $candidateStatuses = [
+                $payment['status'] ?? null,
+                data_get($payment, 'attributes.status'),
+                data_get($payment, 'data.attributes.status'),
+            ];
+
+            foreach ($candidateStatuses as $candidateStatus) {
+                if (is_string($candidateStatus) && trim($candidateStatus) !== '') {
+                    $statuses[] = $candidateStatus;
+                }
+            }
+        }
+
+        return $statuses;
     }
 
     private function mapCheckoutStatusToOrderStatus(string $status): string

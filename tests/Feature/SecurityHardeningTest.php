@@ -54,6 +54,36 @@ class SecurityHardeningTest extends TestCase
             ]);
     }
 
+    public function test_checkout_verify_marks_session_as_paid_when_payment_intent_is_succeeded(): void
+    {
+        Config::set('services.paymongo.secret_key', 'test_secret');
+        Config::set('services.paymongo.api_base_url', 'https://example.test');
+
+        Http::fake([
+            'https://example.test/v1/checkout_sessions/*' => Http::response([
+                'data' => [
+                    'attributes' => [
+                        'status' => 'active',
+                        'payment_intent' => [
+                            'id' => 'pi_paid_456',
+                            'status' => 'succeeded',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->getJson('/api/payments/checkout-session/cs_paid_456');
+
+        $response
+            ->assertOk()
+            ->assertJson([
+                'checkout_id' => 'cs_paid_456',
+                'status' => 'paid',
+                'payment_intent_id' => 'pi_paid_456',
+            ]);
+    }
+
     public function test_customer_login_no_longer_accepts_plaintext_password_pin(): void
     {
         Customer::query()->create([
