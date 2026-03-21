@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
+use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductPhoto;
 use App\Models\ProductVariant;
@@ -114,6 +115,56 @@ class ProductController extends Controller
         return is_numeric($value) ? (float) $value : null;
     }
 
+    private function inferRoomTypeFromCategory(?Category $category): int
+    {
+        if (! $category) {
+            return 0;
+        }
+
+        $haystacks = array_filter([
+            strtolower(trim((string) ($category->cat_name ?? ''))),
+            strtolower(trim((string) ($category->cat_url ?? ''))),
+        ]);
+
+        $rules = [
+            1 => ['bedroom', 'bed', 'mattress', 'pillow', 'dresser', 'night-table', 'wardrobe', 'cabinet'],
+            2 => ['kitchen', 'rice-cooker', 'coffee-maker', 'oven', 'toaster', 'pressure-cooker', 'grill', 'kettle', 'pots', 'pans', 'utensil'],
+            3 => ['living', 'sofa', 'leisure-chair', 'lounge-chair', 'ottoman', 'coffee-table', 'center-table', 'tv-rack', 'shelf'],
+            4 => ['outdoor', 'garden', 'patio'],
+            5 => ['study', 'office', 'desk', 'workstation', 'computer-table', 'office-chair'],
+            6 => ['dining', 'dining-room', 'dining-table', 'dining-chair', 'buffet'],
+            7 => ['laundry', 'laundry-room', 'washer', 'dryer', 'hamper'],
+            8 => ['bathroom', 'bath', 'toilet', 'shower', 'sink', 'vanity'],
+        ];
+
+        foreach ($rules as $roomType => $keywords) {
+            foreach ($haystacks as $haystack) {
+                foreach ($keywords as $keyword) {
+                    if (str_contains($haystack, $keyword)) {
+                        return $roomType;
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private function resolveRoomType(Request $request): int
+    {
+        if ($request->exists('pd_room_type')) {
+            return max(0, (int) $request->input('pd_room_type', 0));
+        }
+
+        $categoryId = (int) $request->input('pd_catid', 0);
+        if ($categoryId <= 0) {
+            return 0;
+        }
+
+        $category = Category::query()->select(['cat_id', 'cat_name', 'cat_url'])->find($categoryId);
+        return $this->inferRoomTypeFromCategory($category);
+    }
+
     private function mapVariants(Product $product): array
     {
         return $product->variants->map(function (ProductVariant $variant) {
@@ -219,6 +270,7 @@ class ProductController extends Controller
             'warranty'          => $p->pd_warranty ?? null,
             'catid'             => (int)   $p->pd_catid,
             'catsubid'          => (int)   $p->pd_catsubid,
+            'roomType'          => (int)   ($p->pd_room_type ?? 0),
             'priceSrp'          => $this->toNumber($p->pd_price_srp),
             'priceDp'           => $this->toNumber($p->pd_price_dp),
             'priceMember'       => $this->toNumber($p->pd_price_member),
@@ -256,7 +308,7 @@ class ProductController extends Controller
         $product = Product::query()
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
-                'pd_catid', 'pd_catsubid',
+                'pd_catid', 'pd_catsubid', 'pd_room_type',
                 'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                 'pd_prodpv',
                 'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
@@ -288,7 +340,7 @@ class ProductController extends Controller
         $product = Product::query()
             ->select([
                 'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
-                'pd_catid', 'pd_catsubid',
+                'pd_catid', 'pd_catsubid', 'pd_room_type',
                 'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                 'pd_prodpv',
                 'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
@@ -323,12 +375,13 @@ class ProductController extends Controller
             $search  = trim((string) $request->query('q', ''));
             $status  = $request->query('status', '');
             $catId   = $request->query('cat_id', '');
+            $roomType = $request->query('room_type', '');
             $requestedSupplierId = (int) $request->query('supplier_id', 0);
 
             $query = Product::query()
                 ->select([
                     'pd_id', 'pd_name', 'pd_description', 'pd_specifications', 'pd_material', 'pd_warranty',
-                    'pd_catid', 'pd_catsubid',
+                    'pd_catid', 'pd_catsubid', 'pd_room_type',
                     'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_qty',
                     'pd_prodpv',
                     'pd_weight', 'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
@@ -359,6 +412,9 @@ class ProductController extends Controller
                 })
                 ->when($catId !== '', function ($q) use ($catId) {
                     $q->where('pd_catid', (int) $catId);
+                })
+                ->when($roomType !== '', function ($q) use ($roomType) {
+                    $q->where('pd_room_type', (int) $roomType);
                 })
                 ->orderByDesc('pd_id');
 
@@ -422,6 +478,7 @@ class ProductController extends Controller
         $validator = Validator::make($request->all(), [
             'pd_name'      => 'required|string|max:255',
             'pd_catid'     => 'required|integer',
+            'pd_room_type' => 'nullable|integer|min:0|max:8',
             'pd_catsubid'  => 'nullable|integer',
             'pd_price_srp' => 'required|numeric|min:0',
             'pd_price_dp'  => 'nullable|numeric|min:0',
@@ -490,6 +547,7 @@ class ProductController extends Controller
                 $product = Product::create([
                     'pd_name'        => $request->pd_name,
                     'pd_catid'       => $request->pd_catid ?? 0,
+                    'pd_room_type'   => $this->resolveRoomType($request),
                     'pd_catsubid'    => $request->pd_catsubid ?? 0,
                     'pd_catsubid2'   => 0,
                     'pd_shopid'      => 0,
@@ -595,6 +653,7 @@ class ProductController extends Controller
         $validator = Validator::make($request->all(), [
             'pd_name'        => 'sometimes|required|string|max:255',
             'pd_catid'       => 'sometimes|required|integer',
+            'pd_room_type'   => 'nullable|integer|min:0|max:8',
             'pd_catsubid'    => 'nullable|integer',
             'pd_price_srp'   => 'sometimes|required|numeric|min:0',
             'pd_price_dp'    => 'nullable|numeric|min:0',
@@ -640,7 +699,7 @@ class ProductController extends Controller
         }
 
         $fields = [
-            'pd_name', 'pd_catid', 'pd_catsubid', 'pd_description', 'pd_specifications',
+            'pd_name', 'pd_catid', 'pd_room_type', 'pd_catsubid', 'pd_description', 'pd_specifications',
             'pd_material', 'pd_warranty',
             'pd_price_srp', 'pd_price_dp', 'pd_price_member', 'pd_prodpv', 'pd_qty', 'pd_weight',
             'pd_psweight', 'pd_pswidth', 'pd_pslenght', 'pd_psheight',
@@ -657,6 +716,10 @@ class ProductController extends Controller
                             $product->$field = $request->$field;
                         }
                     }
+                }
+
+                if ($request->has('pd_catid') && ! $request->exists('pd_room_type')) {
+                    $product->pd_room_type = $this->resolveRoomType($request);
                 }
 
                 if ($request->has('pd_musthave')) {
