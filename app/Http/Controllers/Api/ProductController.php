@@ -184,6 +184,7 @@ class ProductController extends Controller
                 'priceSrp' => $this->toOptionalNumber($variant->pv_price_srp),
                 'priceDp'  => $this->toOptionalNumber($variant->pv_price_dp),
                 'priceMember' => $this->toOptionalNumber($variant->pv_price_member),
+                'prodpv'   => $this->toOptionalNumber($variant->pv_prodpv),
                 'qty'      => $this->toOptionalNumber($variant->pv_qty),
                 'status'   => (int) ($variant->pv_status ?? 1),
                 'images'   => $images,
@@ -234,6 +235,7 @@ class ProductController extends Controller
                 'pv_price_srp' => isset($variant['pv_price_srp']) && $variant['pv_price_srp'] !== '' ? $variant['pv_price_srp'] : null,
                 'pv_price_dp'  => isset($variant['pv_price_dp']) && $variant['pv_price_dp'] !== '' ? $variant['pv_price_dp'] : null,
                 'pv_price_member' => isset($variant['pv_price_member']) && $variant['pv_price_member'] !== '' ? $variant['pv_price_member'] : null,
+                'pv_prodpv'    => isset($variant['pv_prodpv']) && $variant['pv_prodpv'] !== '' ? $variant['pv_prodpv'] : null,
                 'pv_qty'       => isset($variant['pv_qty']) && $variant['pv_qty'] !== '' ? $variant['pv_qty'] : null,
                 'pv_status'    => isset($variant['pv_status']) ? (int) $variant['pv_status'] : 1,
                 'pv_date'      => $now,
@@ -318,7 +320,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->tap(fn ($query) => $this->applyPublicVisibility($query))
@@ -350,7 +352,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->tap(fn ($query) => $this->applyPublicVisibility($query))
@@ -391,7 +393,7 @@ class ProductController extends Controller
                 ])
                 ->with([
                     'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                    'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_qty,pv_status,pv_date',
+                    'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                     'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
                 ])
                 ->when($search !== '', function ($q) use ($search) {
@@ -513,6 +515,7 @@ class ProductController extends Controller
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_prodpv'   => 'nullable|numeric|min:0',
             'pd_variants.*.pv_qty'       => 'nullable|numeric|min:0',
             'pd_variants.*.pv_status'    => 'nullable|integer|in:0,1',
             'pd_variants.*.pv_images'    => 'nullable|array',
@@ -688,6 +691,7 @@ class ProductController extends Controller
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_prodpv'   => 'nullable|numeric|min:0',
             'pd_variants.*.pv_qty'       => 'nullable|numeric|min:0',
             'pd_variants.*.pv_status'    => 'nullable|integer|in:0,1',
             'pd_variants.*.pv_images'    => 'nullable|array',
