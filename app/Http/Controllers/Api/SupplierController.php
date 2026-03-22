@@ -4,14 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
+use App\Models\Category;
 use App\Models\Product;
 use App\Models\Supplier;
+use App\Models\SupplierCategoryAccess;
 use App\Models\SupplierUser;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SupplierController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $admin = $this->resolveAdmin($request);
         $supplierUser = $this->resolveSupplierUser($request);
@@ -33,6 +37,70 @@ class SupplierController extends Controller
 
         return response()->json([
             'suppliers' => $query->get()->map(fn (Supplier $supplier) => $this->transform($supplier))->values(),
+        ]);
+    }
+
+    public function categories(Request $request, int $id): JsonResponse
+    {
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
+        if (! $admin && ! $supplierUser) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $supplier = $this->resolveAccessibleSupplier($id, $admin, $supplierUser);
+        if (! $supplier) {
+            return response()->json(['message' => 'Supplier company not found.'], 404);
+        }
+
+        return response()->json([
+            'supplier_id' => (int) $supplier->s_id,
+            'categories' => $this->assignedCategories((int) $supplier->s_id),
+        ]);
+    }
+
+    public function syncCategories(Request $request, int $id): JsonResponse
+    {
+        $admin = $this->resolveAdmin($request);
+        if (! $admin) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $supplier = Supplier::query()->find($id);
+        if (! $supplier) {
+            return response()->json(['message' => 'Supplier company not found.'], 404);
+        }
+
+        $validated = $request->validate([
+            'category_ids' => 'array',
+            'category_ids.*' => 'integer|exists:tbl_category,cat_id',
+        ]);
+
+        $categoryIds = collect($validated['category_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        DB::transaction(function () use ($supplier, $categoryIds) {
+            SupplierCategoryAccess::query()
+                ->where('supplier_id', (int) $supplier->s_id)
+                ->delete();
+
+            foreach ($categoryIds as $categoryId) {
+                SupplierCategoryAccess::query()->create([
+                    'supplier_id' => (int) $supplier->s_id,
+                    'category_id' => $categoryId,
+                    'created_at' => now(),
+                ]);
+            }
+        });
+
+        return response()->json([
+            'message' => 'Supplier category access updated successfully.',
+            'supplier_id' => (int) $supplier->s_id,
+            'categories' => $this->assignedCategories((int) $supplier->s_id),
         ]);
     }
 
@@ -178,6 +246,42 @@ class SupplierController extends Controller
             'contact' => (string) ($supplier->s_contact ?? ''),
             'address' => (string) ($supplier->s_address ?? ''),
             'status' => (int) ($supplier->s_status ?? 0),
+            'assigned_categories' => $this->assignedCategories((int) $supplier->s_id),
         ];
+    }
+
+    private function resolveAccessibleSupplier(int $supplierId, ?Admin $admin, ?SupplierUser $supplierUser): ?Supplier
+    {
+        $query = Supplier::query()->where('s_id', $supplierId);
+
+        if ($supplierUser) {
+            $query->where('s_id', (int) $supplierUser->su_supplier);
+        } elseif ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin') {
+            $query->where('s_id', (int) ($admin->supplier_id ?? 0));
+        }
+
+        return $query->first();
+    }
+
+    private function assignedCategories(int $supplierId): array
+    {
+        if ($supplierId <= 0) {
+            return [];
+        }
+
+        return Category::query()
+            ->select(['tbl_category.cat_id', 'tbl_category.cat_name', 'tbl_category.cat_url'])
+            ->join('tbl_supplier_category_access', 'tbl_supplier_category_access.category_id', '=', 'tbl_category.cat_id')
+            ->where('tbl_supplier_category_access.supplier_id', $supplierId)
+            ->orderBy('tbl_category.cat_order')
+            ->orderBy('tbl_category.cat_name')
+            ->get()
+            ->map(fn (Category $category) => [
+                'id' => (int) $category->cat_id,
+                'name' => (string) ($category->cat_name ?? ''),
+                'url' => (string) ($category->cat_url ?? ''),
+            ])
+            ->values()
+            ->all();
     }
 }

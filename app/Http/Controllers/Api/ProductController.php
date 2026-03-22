@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductPhoto;
 use App\Models\ProductVariant;
 use App\Models\ProductVariantPhoto;
+use App\Models\SupplierCategoryAccess;
 use App\Models\SupplierUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -163,6 +164,31 @@ class ProductController extends Controller
 
         $category = Category::query()->select(['cat_id', 'cat_name', 'cat_url'])->find($categoryId);
         return $this->inferRoomTypeFromCategory($category);
+    }
+
+    private function actorSupplierId(?Admin $admin, ?SupplierUser $supplierUser): int
+    {
+        if ($supplierUser) {
+            return (int) $supplierUser->su_supplier;
+        }
+
+        if ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin') {
+            return (int) ($admin->supplier_id ?? 0);
+        }
+
+        return 0;
+    }
+
+    private function supplierCanUseCategory(int $supplierId, int $categoryId): bool
+    {
+        if ($supplierId <= 0 || $categoryId <= 0) {
+            return false;
+        }
+
+        return SupplierCategoryAccess::query()
+            ->where('supplier_id', $supplierId)
+            ->where('category_id', $categoryId)
+            ->exists();
     }
 
     private function mapVariants(Product $product): array
@@ -472,6 +498,7 @@ class ProductController extends Controller
     {
         $admin = $this->resolveAdmin($request);
         $supplierUser = $this->resolveSupplierUser($request);
+        $actorSupplierId = $this->actorSupplierId($admin, $supplierUser);
         if ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin' && ! $admin->supplier_id) {
             return response()->json([
                 'message' => 'Supplier Admin account is not linked to a supplier company.',
@@ -526,6 +553,15 @@ class ProductController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        $categoryId = (int) $request->input('pd_catid', 0);
+        if ($actorSupplierId > 0 && ! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
+            return response()->json([
+                'errors' => [
+                    'pd_catid' => ['This supplier is not allowed to use the selected category.'],
+                ],
+            ], 422);
+        }
+
         $now = now();
 
         $images = collect($request->input('pd_images', []))
@@ -540,13 +576,7 @@ class ProductController extends Controller
         try {
         $product = DB::transaction(function () use ($request, $now, $images, $admin, $supplierUser) {
             try {
-                $supplierId = $supplierUser
-                    ? (int) $supplierUser->su_supplier
-                    : (
-                        $admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin'
-                            ? (int) ($admin->supplier_id ?? 0)
-                            : 0
-                    );
+                $supplierId = $this->actorSupplierId($admin, $supplierUser);
                 $product = Product::create([
                     'pd_name'        => $request->pd_name,
                     'pd_catid'       => $request->pd_catid ?? 0,
@@ -646,6 +676,7 @@ class ProductController extends Controller
     {
         $admin = $this->resolveAdmin($request);
         $supplierUser = $this->resolveSupplierUser($request);
+        $actorSupplierId = $this->actorSupplierId($admin, $supplierUser);
         $productQuery = Product::query()->where('pd_id', $id);
         $this->scopeQueryToActor($productQuery, $admin, $supplierUser);
         $product = $productQuery->first();
@@ -700,6 +731,17 @@ class ProductController extends Controller
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        if ($request->has('pd_catid') && $actorSupplierId > 0) {
+            $categoryId = (int) $request->input('pd_catid', 0);
+            if (! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
+                return response()->json([
+                    'errors' => [
+                        'pd_catid' => ['This supplier is not allowed to use the selected category.'],
+                    ],
+                ], 422);
+            }
         }
 
         $fields = [

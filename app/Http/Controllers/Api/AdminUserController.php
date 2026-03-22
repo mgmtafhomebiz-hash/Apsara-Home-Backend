@@ -24,8 +24,8 @@ class AdminUserController extends Controller
         if (!$actor) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
-        if (!$this->isSuperAdmin($actor)) {
-            return response()->json(['message' => 'Forbidden: only super admin can access admin user management.'], 403);
+        if (!$this->canManageAdminUsers($actor)) {
+            return response()->json(['message' => 'Forbidden: only admin managers can access admin user management.'], 403);
         }
 
         $validated = $request->validate([
@@ -39,6 +39,9 @@ class AdminUserController extends Controller
 
         $rows = Admin::query()
             ->with('supplier')
+            ->when(!$this->isSuperAdmin($actor), function ($builder) use ($actor) {
+                $builder->whereIn('user_level_id', $this->allowedInviteLevels($actor));
+            })
             ->when($search !== '', function ($builder) use ($search) {
                 $builder->where(function ($q) use ($search) {
                     $q->where('fname', 'like', "%{$search}%")
@@ -68,23 +71,29 @@ class AdminUserController extends Controller
         if (!$actor) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
-        if (!$this->isSuperAdmin($actor)) {
-            return response()->json(['message' => 'Forbidden: only super admin can create admin accounts.'], 403);
+        if (!$this->canManageAdminUsers($actor)) {
+            return response()->json(['message' => 'Forbidden: only admin managers can create sub-admin accounts.'], 403);
         }
 
+        $allowedLevels = $this->allowedInviteLevels($actor);
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'username' => 'required|string|max:120|unique:tbl_admin,username',
-            'email' => 'required|email|max:255|unique:tbl_admin,user_email',
-            'user_level_id' => ['required', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
+            'email' => [
+                'nullable',
+                'email',
+                'max:255',
+                Rule::unique('tbl_admin', 'user_email')->where(function ($query) {
+                    $query->whereRaw("COALESCE(NULLIF(TRIM(user_email), ''), '') <> ''");
+                }),
+            ],
+            'user_level_id' => ['required', 'integer', Rule::in($allowedLevels)],
             'supplier_id' => 'nullable|integer|exists:tbl_supplier,s_id',
         ]);
 
         $this->ensureSupplierSelection($validated);
 
-        return response()->json([
-            'message' => $this->createAndSendInvite($validated, (int) $actor->id),
-        ], 201);
+        return response()->json($this->createInviteResponse($validated, (int) $actor->id), 201);
     }
 
     public function showInvite(string $token)
@@ -98,7 +107,7 @@ class AdminUserController extends Controller
             'invite' => [
                 'name' => (string) $payload['name'],
                 'username' => (string) $payload['username'],
-                'email' => (string) $payload['email'],
+                'email' => (string) ($payload['email'] ?? ''),
                 'role' => $this->roleFromLevel((int) $payload['user_level_id']),
                 'expires_at' => (string) $payload['expires_at'],
             ],
@@ -119,10 +128,17 @@ class AdminUserController extends Controller
             ]);
         }
 
-        $email = trim((string) $payload['email']);
+        $email = trim((string) ($payload['email'] ?? ''));
         $username = trim((string) $payload['username']);
 
-        if (Admin::query()->where('user_email', $email)->orWhere('username', $username)->exists()) {
+        $alreadyExists = Admin::query()
+            ->where('username', $username)
+            ->when($email !== '', function ($query) use ($email) {
+                $query->orWhere('user_email', $email);
+            })
+            ->exists();
+
+        if ($alreadyExists) {
             Cache::forget($this->inviteCacheKey((string) $validated['token']));
 
             return response()->json([
@@ -153,12 +169,14 @@ class AdminUserController extends Controller
         if (!$actor) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
-        if (!$this->isSuperAdmin($actor)) {
-            return response()->json(['message' => 'Forbidden: only super admin can update admin accounts.'], 403);
+        if (!$this->canManageAdminUsers($actor)) {
+            return response()->json(['message' => 'Forbidden: only admin managers can update admin accounts.'], 403);
         }
 
         $admin = Admin::query()->where('id', $id)->firstOrFail();
+        $this->ensureCanManageTarget($actor, $admin);
 
+        $allowedLevels = $this->allowedInviteLevels($actor);
         $validated = $request->validate([
             'name' => 'nullable|string|max:255',
             'username' => [
@@ -171,10 +189,12 @@ class AdminUserController extends Controller
                 'nullable',
                 'email',
                 'max:255',
-                Rule::unique('tbl_admin', 'user_email')->ignore($admin->id, 'id'),
+                Rule::unique('tbl_admin', 'user_email')->ignore($admin->id, 'id')->where(function ($query) {
+                    $query->whereRaw("COALESCE(NULLIF(TRIM(user_email), ''), '') <> ''");
+                }),
             ],
             'password' => 'nullable|string|min:8',
-            'user_level_id' => ['nullable', 'integer', Rule::in([1, 2, 3, 4, 5, 6, 7, 8])],
+            'user_level_id' => ['nullable', 'integer', Rule::in($allowedLevels)],
             'supplier_id' => 'nullable|integer|exists:tbl_supplier,s_id',
         ]);
 
@@ -221,15 +241,16 @@ class AdminUserController extends Controller
         if (!$actor) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
-        if (!$this->isSuperAdmin($actor)) {
-            return response()->json(['message' => 'Forbidden: only super admin can delete admin accounts.'], 403);
+        if (!$this->canManageAdminUsers($actor)) {
+            return response()->json(['message' => 'Forbidden: only admin managers can delete admin accounts.'], 403);
         }
 
         if ((int) $actor->id === $id) {
-            return response()->json(['message' => 'You cannot delete your own super admin account.'], 422);
+            return response()->json(['message' => 'You cannot delete your own admin account.'], 422);
         }
 
         $admin = Admin::query()->where('id', $id)->firstOrFail();
+        $this->ensureCanManageTarget($actor, $admin);
         $admin->delete();
 
         return response()->json([
@@ -246,6 +267,16 @@ class AdminUserController extends Controller
     private function isSuperAdmin(Admin $admin): bool
     {
         return (int) $admin->user_level_id === 1;
+    }
+
+    private function isAdmin(Admin $admin): bool
+    {
+        return (int) $admin->user_level_id === 2;
+    }
+
+    private function canManageAdminUsers(Admin $admin): bool
+    {
+        return $this->isSuperAdmin($admin) || $this->isAdmin($admin);
     }
 
     private function roleFromLevel(int $level): string
@@ -277,14 +308,15 @@ class AdminUserController extends Controller
         ];
     }
 
-    private function createAndSendInvite(array $validated, int $actorId): string
+    private function createInviteResponse(array $validated, int $actorId): array
     {
         $token = Str::random(64);
         $expiresAt = now()->addMinutes(self::INVITE_TTL_MINUTES);
+        $email = trim((string) ($validated['email'] ?? ''));
         $payload = [
             'name' => trim((string) $validated['name']),
             'username' => trim((string) $validated['username']),
-            'email' => trim((string) $validated['email']),
+            'email' => $email,
             'user_level_id' => (int) $validated['user_level_id'],
             'supplier_id' => isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null,
             'created_by' => $actorId,
@@ -299,15 +331,32 @@ class AdminUserController extends Controller
             urlencode($token)
         );
 
-        Mail::to($payload['email'])->send(new AdminInviteMail(
-            name: $payload['name'],
-            email: $payload['email'],
-            roleLabel: $this->roleLabel((int) $payload['user_level_id']),
-            setupUrl: $setupUrl,
-            expiresAt: $expiresAt->toDayDateTimeString(),
-        ));
+        $delivery = 'link_only';
+        if ($email !== '') {
+            Mail::to($email)->send(new AdminInviteMail(
+                name: $payload['name'],
+                email: $email,
+                roleLabel: $this->roleLabel((int) $payload['user_level_id']),
+                setupUrl: $setupUrl,
+                expiresAt: $expiresAt->toDayDateTimeString(),
+            ));
+            $delivery = 'email_and_link';
+        }
 
-        return 'Admin invite sent successfully.';
+        return [
+            'message' => $email !== ''
+                ? 'Sub-admin invite created and emailed successfully.'
+                : 'Sub-admin invite link created successfully.',
+            'setup_url' => $setupUrl,
+            'delivery' => $delivery,
+            'invite' => [
+                'name' => $payload['name'],
+                'username' => $payload['username'],
+                'email' => $email,
+                'role' => $this->roleFromLevel((int) $payload['user_level_id']),
+                'expires_at' => $expiresAt->toIso8601String(),
+            ],
+        ];
     }
 
     private function getInvitePayload(string $token): ?array
@@ -324,6 +373,32 @@ class AdminUserController extends Controller
     private function roleLabel(int $level): string
     {
         return str_replace('_', ' ', Str::title($this->roleFromLevel($level)));
+    }
+
+    private function allowedInviteLevels(Admin $actor): array
+    {
+        if ($this->isSuperAdmin($actor)) {
+            return [1, 2, 3, 4, 5, 6, 7, 8];
+        }
+
+        if ($this->isAdmin($actor)) {
+            return [3, 4, 5, 6, 7];
+        }
+
+        return [];
+    }
+
+    private function ensureCanManageTarget(Admin $actor, Admin $target): void
+    {
+        if ($this->isSuperAdmin($actor)) {
+            return;
+        }
+
+        if (! in_array((int) $target->user_level_id, $this->allowedInviteLevels($actor), true)) {
+            throw ValidationException::withMessages([
+                'user_level_id' => ['You can only manage lower sub-admin roles.'],
+            ]);
+        }
     }
 
     private function ensureSupplierSelection(array $payload): void

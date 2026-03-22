@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\SupplierCategoryAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,13 @@ class CategoryController extends Controller
         $search = trim((string) $request->query('q', ''));
         $supplierId = (int) $request->query('supplier_id', 0);
         $usedOnly = $request->boolean('used_only', false);
+        $assignedCategoryIds = $supplierId > 0
+            ? SupplierCategoryAccess::query()
+                ->where('supplier_id', $supplierId)
+                ->pluck('category_id')
+                ->map(fn ($id) => (int) $id)
+                ->all()
+            : [];
 
         $productCounts = DB::table('tbl_product')
             ->selectRaw('pd_catid as category_id, COUNT(*) as total')
@@ -34,6 +42,9 @@ class CategoryController extends Controller
             ->when($usedOnly && $supplierId > 0, function ($query) use ($productCounts) {
                 $categoryIds = collect($productCounts)->keys()->map(fn ($id) => (int) $id)->all();
                 $query->whereIn('cat_id', !empty($categoryIds) ? $categoryIds : [-1]);
+            })
+            ->when($supplierId > 0, function ($query) use ($assignedCategoryIds) {
+                $query->whereIn('cat_id', !empty($assignedCategoryIds) ? $assignedCategoryIds : [-1]);
             })
             ->when($search !== '', function ($q) use ($search) {
                 $like = '%' . $search . '%';

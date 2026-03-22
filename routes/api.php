@@ -59,7 +59,7 @@ Route::match(['GET', 'POST'], '/jnt/webhook/order-status', [JntWebhookController
 
 
 // Protected routes (requires Sanctum token)
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'customer.actor'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me',      [AuthController::class, 'me']);
     Route::get('/auth/referral-tree', [AuthController::class, 'referralTree']);
@@ -99,6 +99,10 @@ Route::middleware(['auth:sanctum', 'admin.or_supplier'])->group(function () {
     Route::put('/admin/products/{id}', [ProductController::class, 'update']);
     Route::delete('/admin/products/{id}', [ProductController::class, 'destroy']);
     Route::get('/admin/suppliers', [SupplierController::class, 'index']);
+    Route::get('/admin/suppliers/{id}/categories', [SupplierController::class, 'categories']);
+    Route::get('/admin/supplier-users', [SupplierUserController::class, 'index']);
+    Route::post('/admin/supplier-users', [SupplierUserController::class, 'store']);
+    Route::delete('/admin/supplier-users/{id}', [SupplierUserController::class, 'destroy']);
 });
 
 Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin,merchant_admin,web_content'])->group(function () {
@@ -112,7 +116,7 @@ Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin'])->group(funct
     Route::post('/admin/suppliers', [SupplierController::class, 'store']);
     Route::put('/admin/suppliers/{id}', [SupplierController::class, 'update']);
     Route::delete('/admin/suppliers/{id}', [SupplierController::class, 'destroy']);
-    Route::post('/admin/supplier-users', [SupplierUserController::class, 'store']);
+    Route::put('/admin/suppliers/{id}/categories', [SupplierController::class, 'syncCategories']);
 });
 
 Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin,csr,merchant_admin'])->group(function () {
@@ -146,7 +150,7 @@ Route::middleware(['auth:sanctum', 'admin.role:super_admin,accounting,finance_of
     Route::patch('/admin/encashment/{id}/release', [AdminEncashmentController::class, 'release']);
 });
 
-Route::middleware(['auth:sanctum', 'admin.role:super_admin'])->group(function () {
+Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin'])->group(function () {
     Route::get('/admin/users', [AdminUserController::class, 'index']);
     Route::post('/admin/users', [AdminUserController::class, 'store']);
     Route::put('/admin/users/{id}', [AdminUserController::class, 'update']);

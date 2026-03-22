@@ -182,6 +182,8 @@ class SupplierAuthController extends Controller
             'supplier_id' => (int) $supplierUser->su_supplier,
             'supplier_name' => $supplierUser->supplier?->s_company ?: $supplierUser->supplier?->s_name,
             'username' => (string) $supplierUser->su_username,
+            'level_type' => (int) ($supplierUser->su_level_type ?? 0),
+            'is_main_supplier' => (int) ($supplierUser->su_level_type ?? 0) === 1,
         ];
     }
 
