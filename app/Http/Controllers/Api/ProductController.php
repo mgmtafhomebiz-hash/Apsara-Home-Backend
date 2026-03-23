@@ -19,6 +19,14 @@ use Illuminate\Support\Facades\Validator;
 
 class ProductController extends Controller
 {
+    private function validationErrorResponse($validator): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Validation failed.',
+            'errors' => $validator->errors(),
+        ], 422);
+    }
+
     private function applyPublicVisibility($query)
     {
         return $query->whereIn('pd_status', [1, 2]);
@@ -207,6 +215,9 @@ class ProductController extends Controller
                 'color'    => (string) ($variant->pv_color ?? ''),
                 'colorHex' => (string) ($variant->pv_color_hex ?? ''),
                 'size'     => (string) ($variant->pv_size ?? ''),
+                'width'    => $this->toOptionalNumber($variant->pv_width),
+                'dimension' => $this->toOptionalNumber($variant->pv_dimension),
+                'height'   => $this->toOptionalNumber($variant->pv_height),
                 'priceSrp' => $this->toOptionalNumber($variant->pv_price_srp),
                 'priceDp'  => $this->toOptionalNumber($variant->pv_price_dp),
                 'priceMember' => $this->toOptionalNumber($variant->pv_price_member),
@@ -242,12 +253,15 @@ class ProductController extends Controller
             $name = isset($variant['pv_name']) ? trim((string) $variant['pv_name']) : '';
             $color = isset($variant['pv_color']) ? trim((string) $variant['pv_color']) : '';
             $size = isset($variant['pv_size']) ? trim((string) $variant['pv_size']) : '';
+            $width = isset($variant['pv_width']) && $variant['pv_width'] !== '' ? $variant['pv_width'] : null;
+            $dimension = isset($variant['pv_dimension']) && $variant['pv_dimension'] !== '' ? $variant['pv_dimension'] : null;
+            $height = isset($variant['pv_height']) && $variant['pv_height'] !== '' ? $variant['pv_height'] : null;
             $images = collect($variant['pv_images'] ?? [])
                 ->filter(fn ($url) => is_string($url) && trim($url) !== '')
                 ->values()
                 ->all();
 
-            if ($sku === '' && $name === '' && $color === '' && $size === '' && empty($images)) {
+            if ($sku === '' && $name === '' && $color === '' && $size === '' && $width === null && $dimension === null && $height === null && empty($images)) {
                 continue;
             }
 
@@ -258,6 +272,9 @@ class ProductController extends Controller
                 'pv_color'     => $color !== '' ? $color : null,
                 'pv_color_hex' => isset($variant['pv_color_hex']) ? trim((string) $variant['pv_color_hex']) : null,
                 'pv_size'      => $size !== '' ? $size : null,
+                'pv_width'     => $width,
+                'pv_dimension' => $dimension,
+                'pv_height'    => $height,
                 'pv_price_srp' => isset($variant['pv_price_srp']) && $variant['pv_price_srp'] !== '' ? $variant['pv_price_srp'] : null,
                 'pv_price_dp'  => isset($variant['pv_price_dp']) && $variant['pv_price_dp'] !== '' ? $variant['pv_price_dp'] : null,
                 'pv_price_member' => isset($variant['pv_price_member']) && $variant['pv_price_member'] !== '' ? $variant['pv_price_member'] : null,
@@ -346,7 +363,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_width,pv_dimension,pv_height,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->tap(fn ($query) => $this->applyPublicVisibility($query))
@@ -378,7 +395,7 @@ class ProductController extends Controller
             ])
             ->with([
                 'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
+                'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_width,pv_dimension,pv_height,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                 'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
             ])
             ->tap(fn ($query) => $this->applyPublicVisibility($query))
@@ -419,7 +436,7 @@ class ProductController extends Controller
                 ])
                 ->with([
                     'photos:pp_id,pp_pdid,pp_filename,pp_varone,pp_date',
-                    'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
+                    'variants:pv_id,pv_pdid,pv_sku,pv_name,pv_color,pv_color_hex,pv_size,pv_width,pv_dimension,pv_height,pv_price_srp,pv_price_dp,pv_price_member,pv_prodpv,pv_qty,pv_status,pv_date',
                     'variants.photos:pvp_id,pvp_pvid,pvp_filename,pvp_sort,pvp_date',
                 ])
                 ->when($search !== '', function ($q) use ($search) {
@@ -514,7 +531,7 @@ class ProductController extends Controller
             'pd_price_member' => 'nullable|numeric|min:0',
             'pd_prodpv'    => 'nullable|numeric|min:0',
             'pd_qty'       => 'nullable|numeric|min:0',
-            'pd_weight'    => 'nullable|integer|min:0',
+            'pd_weight'    => 'nullable|numeric|min:0',
             'pd_psweight'  => 'nullable|numeric|min:0',
             'pd_pslenght'  => 'nullable|numeric|min:0',
             'pd_psheight'  => 'nullable|numeric|min:0',
@@ -539,6 +556,9 @@ class ProductController extends Controller
             'pd_variants.*.pv_color'     => 'nullable|string|max:80',
             'pd_variants.*.pv_color_hex' => 'nullable|string|max:16',
             'pd_variants.*.pv_size'      => 'nullable|string|max:40',
+            'pd_variants.*.pv_width'     => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_dimension' => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_height'    => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
@@ -550,12 +570,13 @@ class ProductController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return $this->validationErrorResponse($validator);
         }
 
         $categoryId = (int) $request->input('pd_catid', 0);
         if ($actorSupplierId > 0 && ! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
             return response()->json([
+                'message' => 'Validation failed.',
                 'errors' => [
                     'pd_catid' => ['This supplier is not allowed to use the selected category.'],
                 ],
@@ -694,7 +715,7 @@ class ProductController extends Controller
             'pd_price_member'=> 'nullable|numeric|min:0',
             'pd_prodpv'      => 'nullable|numeric|min:0',
             'pd_qty'         => 'nullable|numeric|min:0',
-            'pd_weight'      => 'nullable|integer|min:0',
+            'pd_weight'      => 'nullable|numeric|min:0',
             'pd_psweight'    => 'nullable|numeric|min:0',
             'pd_pslenght'    => 'nullable|numeric|min:0',
             'pd_psheight'    => 'nullable|numeric|min:0',
@@ -719,6 +740,9 @@ class ProductController extends Controller
             'pd_variants.*.pv_color'     => 'nullable|string|max:80',
             'pd_variants.*.pv_color_hex' => 'nullable|string|max:16',
             'pd_variants.*.pv_size'      => 'nullable|string|max:40',
+            'pd_variants.*.pv_width'     => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_dimension' => 'nullable|numeric|min:0',
+            'pd_variants.*.pv_height'    => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_srp' => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_dp'  => 'nullable|numeric|min:0',
             'pd_variants.*.pv_price_member' => 'nullable|numeric|min:0',
@@ -730,13 +754,14 @@ class ProductController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return $this->validationErrorResponse($validator);
         }
 
         if ($request->has('pd_catid') && $actorSupplierId > 0) {
             $categoryId = (int) $request->input('pd_catid', 0);
             if (! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
                 return response()->json([
+                    'message' => 'Validation failed.',
                     'errors' => [
                         'pd_catid' => ['This supplier is not allowed to use the selected category.'],
                     ],
