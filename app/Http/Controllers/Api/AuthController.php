@@ -161,6 +161,7 @@ class AuthController extends Controller
             'c_country'      => $registration['country'] ?? (($registration['work_location'] ?? 'local') === 'overseas' ? 'Overseas' : 'Philippines'),
             'c_password'     => Hash::make($registration['password']),
             'c_password_pin' => '',
+            'c_rank'         => 0,
             'c_sponsor'      => $referrerUserId,
             'c_date_started' => now(),
             'c_address'      => $registration['address'] ?? null,
