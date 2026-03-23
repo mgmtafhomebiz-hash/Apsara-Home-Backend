@@ -55,7 +55,7 @@ class Product extends Model
         'pd_price_member'=> 'float',
         'pd_prodpv'      => 'float',
         'pd_qty'         => 'float',
-        'pd_weight'      => 'integer',
+        'pd_weight'      => 'float',
         'pd_psweight'           => 'float',
         'pd_pswidth'            => 'float',
         'pd_pslenght'           => 'float',
