@@ -90,6 +90,8 @@ Route::middleware(['auth:sanctum', 'customer.actor'])->group(function () {
 Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin,csr'])->group(function () {
     Route::get('/admin/members', [MemberController::class, 'index']);
     Route::get('/admin/members/stats', [MemberController::class, 'stats']);
+    Route::get('/admin/members/referrals', [MemberController::class, 'referralTree']);
+    Route::patch('/admin/members/{id}', [MemberController::class, 'update']);
     Route::get('/admin/members/kyc', [AdminMemberKycController::class, 'index']);
     Route::patch('/admin/members/kyc/{id}/approve', [AdminMemberKycController::class, 'approve']);
     Route::patch('/admin/members/kyc/{id}/reject', [AdminMemberKycController::class, 'reject']);
