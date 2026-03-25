@@ -822,6 +822,11 @@ class ProductController extends Controller
                             $product->pd_room_type = ($rawRoomType === null || $rawRoomType === '')
                                 ? $this->resolveRoomType($request)
                                 : max(0, (int) $rawRoomType);
+                        } elseif ($field === 'pd_brand_type') {
+                            $rawBrandType = $request->input('pd_brand_type');
+                            $product->pd_brand_type = ($rawBrandType === null || $rawBrandType === '')
+                                ? 0
+                                : max(0, (int) $rawBrandType);
                         } else {
                             $product->$field = $request->$field;
                         }
