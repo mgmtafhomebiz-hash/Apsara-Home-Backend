@@ -817,6 +817,11 @@ class ProductController extends Controller
                     if ($request->has($field)) {
                         if (in_array($field, ['pd_material', 'pd_warranty'], true)) {
                             $product->$field = $request->filled($field) ? (string) $request->$field : '';
+                        } elseif ($field === 'pd_room_type') {
+                            $rawRoomType = $request->input('pd_room_type');
+                            $product->pd_room_type = ($rawRoomType === null || $rawRoomType === '')
+                                ? $this->resolveRoomType($request)
+                                : max(0, (int) $rawRoomType);
                         } else {
                             $product->$field = $request->$field;
                         }
