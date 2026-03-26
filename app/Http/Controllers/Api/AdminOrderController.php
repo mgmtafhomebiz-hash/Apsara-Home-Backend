@@ -12,6 +12,7 @@ use App\Models\Customer;
 use App\Models\CustomerWalletLedger;
 use App\Services\Shipping\JntShippingService;
 use App\Services\Shipping\XdeShippingService;
+use App\Support\AdminAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -43,8 +44,13 @@ class AdminOrderController extends Controller
         $rows = AdminNotification::query()
             ->orderByDesc('an_created_at')
             ->orderByDesc('an_id')
-            ->limit($limit)
+            ->limit(max(100, $limit * 5))
             ->get();
+
+        $rows = $rows
+            ->filter(fn (AdminNotification $notification) => $this->canAdminSeeNotification($admin, $notification))
+            ->take($limit)
+            ->values();
 
         $notificationIds = $rows->pluck('an_id')->map(fn ($id) => (int) $id)->all();
         $readIds = [];
@@ -76,6 +82,14 @@ class AdminOrderController extends Controller
             ];
         })->values()->all();
 
+        usort($items, function (array $left, array $right) {
+            if (($left['is_read'] ?? false) !== ($right['is_read'] ?? false)) {
+                return ($left['is_read'] ?? false) <=> ($right['is_read'] ?? false);
+            }
+
+            return strcmp((string) ($right['updated_at'] ?? ''), (string) ($left['updated_at'] ?? ''));
+        });
+
         $unreadCount = collect($items)->where('is_read', false)->count();
 
         return response()->json([
@@ -94,6 +108,9 @@ class AdminOrderController extends Controller
 
         $notification = AdminNotification::query()->where('an_id', $id)->first();
         if (!$notification) {
+            return response()->json(['message' => 'Notification not found.'], 404);
+        }
+        if (! $this->canAdminSeeNotification($admin, $notification)) {
             return response()->json(['message' => 'Notification not found.'], 404);
         }
 
@@ -121,6 +138,8 @@ class AdminOrderController extends Controller
             ->orderByDesc('an_created_at')
             ->orderByDesc('an_id')
             ->limit(200)
+            ->get()
+            ->filter(fn (AdminNotification $notification) => $this->canAdminSeeNotification($admin, $notification))
             ->pluck('an_id')
             ->map(fn ($value) => (int) $value)
             ->all();
@@ -216,6 +235,18 @@ class AdminOrderController extends Controller
                 ]
             );
         }
+    }
+
+    private function canAdminSeeNotification(Admin $admin, AdminNotification $notification): bool
+    {
+        if ((int) $admin->user_level_id === 1) {
+            return true;
+        }
+
+        $href = (string) ($notification->an_href ?? '/admin/orders');
+        $permission = AdminAccess::permissionForPath($href);
+
+        return $permission === null || AdminAccess::hasPermission($admin, $permission);
     }
 
     public function pusherAuth(Request $request)
