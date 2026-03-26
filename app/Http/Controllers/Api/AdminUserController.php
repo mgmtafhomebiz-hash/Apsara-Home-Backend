@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -348,7 +349,7 @@ class AdminUserController extends Controller
             'expires_at' => $expiresAt->toIso8601String(),
         ];
 
-        Cache::put($this->inviteCacheKey($token), $payload, $expiresAt);
+        Cache::forever($this->inviteCacheKey($token), $payload);
 
         $setupUrl = sprintf(
             '%s/admin-setup?token=%s',
@@ -369,9 +370,11 @@ class AdminUserController extends Controller
         }
 
         return [
-            'message' => $email !== ''
-                ? 'Sub-admin invite created and emailed successfully.'
-                : 'Sub-admin invite link created successfully.',
+            'message' => sprintf(
+                '%s %s successfully.',
+                $this->roleLabel((int) $payload['user_level_id']),
+                $email !== '' ? 'invite created and emailed' : 'invite link created'
+            ),
             'setup_url' => $setupUrl,
             'delivery' => $delivery,
             'invite' => [
@@ -379,6 +382,7 @@ class AdminUserController extends Controller
                 'username' => $payload['username'],
                 'email' => $email,
                 'role' => AdminAccess::roleFromLevel((int) $payload['user_level_id']),
+                'role_label' => $this->roleLabel((int) $payload['user_level_id']),
                 'expires_at' => $expiresAt->toIso8601String(),
                 'admin_permissions' => $payload['admin_permissions'],
             ],
@@ -388,7 +392,17 @@ class AdminUserController extends Controller
     private function getInvitePayload(string $token): ?array
     {
         $payload = Cache::get($this->inviteCacheKey($token));
-        return is_array($payload) ? $payload : null;
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $expiresAt = isset($payload['expires_at']) ? Carbon::parse((string) $payload['expires_at']) : null;
+        if (! $expiresAt || $expiresAt->isPast()) {
+            Cache::forget($this->inviteCacheKey($token));
+            return null;
+        }
+
+        return $payload;
     }
 
     private function inviteCacheKey(string $token): string

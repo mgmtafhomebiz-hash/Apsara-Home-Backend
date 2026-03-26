@@ -14,6 +14,8 @@ use Illuminate\Validation\Rule;
 
 class MemberController extends Controller
 {
+    private const MEMBERS_CACHE_VERSION_KEY = 'admin:members:cache-version';
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->integer('per_page', 25);
@@ -22,8 +24,10 @@ class MemberController extends Controller
         $status = trim((string) $request->query('status', ''));
         $tier = trim((string) $request->query('tier', ''));
         $sort = trim((string) $request->query('sort', 'default'));
+        $cacheVersion = $this->membersCacheVersion();
 
         $cacheKey = 'admin:members:index:' . md5(json_encode([
+            'v' => $cacheVersion,
             'page' => (int) $request->integer('page', 1),
             'per_page' => $perPage,
             'q' => $search,
@@ -265,7 +269,7 @@ class MemberController extends Controller
 
     public function stats(): JsonResponse
     {
-        $payload = Cache::remember('admin:members:stats', now()->addMinutes(2), function () {
+        $payload = Cache::remember('admin:members:stats:' . $this->membersCacheVersion(), now()->addMinutes(2), function () {
             $total = Customer::count();
             $active = Customer::where('c_lockstatus', 0)->where('c_accnt_status', 1)->count();
             $pending = Customer::where('c_lockstatus', 0)->whereIn('c_accnt_status', [0, 2])->count();
@@ -340,7 +344,7 @@ class MemberController extends Controller
         ]);
         $customer->save();
 
-        Cache::flush();
+        $this->bustMembersCache();
 
         return response()->json([
             'message' => 'Member updated successfully.',
@@ -349,7 +353,7 @@ class MemberController extends Controller
 
     public function referralTree(): JsonResponse
     {
-        $payload = Cache::remember('admin:members:referral-tree', now()->addMinutes(2), function () {
+        $payload = Cache::remember('admin:members:referral-tree:' . $this->membersCacheVersion(), now()->addMinutes(2), function () {
             $members = Customer::query()
                 ->select([
                     'c_userid',
@@ -584,5 +588,18 @@ class MemberController extends Controller
         } catch (\Throwable $exception) {
             return '';
         }
+    }
+
+    private function membersCacheVersion(): int
+    {
+        return (int) Cache::get(self::MEMBERS_CACHE_VERSION_KEY, 1);
+    }
+
+    private function bustMembersCache(): void
+    {
+        Cache::forever(
+            self::MEMBERS_CACHE_VERSION_KEY,
+            $this->membersCacheVersion() + 1
+        );
     }
 }

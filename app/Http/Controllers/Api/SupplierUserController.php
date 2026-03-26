@@ -8,6 +8,7 @@ use App\Models\Admin;
 use App\Models\Supplier;
 use App\Models\SupplierUser;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -216,7 +217,7 @@ class SupplierUserController extends Controller
             'expires_at' => $expiresAt->toIso8601String(),
         ];
 
-        Cache::put($this->inviteCacheKey($token), $payload, $expiresAt);
+        Cache::forever($this->inviteCacheKey($token), $payload);
 
         $setupUrl = sprintf(
             '%s/supplier-setup?token=%s',
@@ -276,7 +277,17 @@ class SupplierUserController extends Controller
     private function getInvitePayload(string $token): ?array
     {
         $payload = Cache::get($this->inviteCacheKey($token));
-        return is_array($payload) ? $payload : null;
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $expiresAt = isset($payload['expires_at']) ? Carbon::parse((string) $payload['expires_at']) : null;
+        if (! $expiresAt || $expiresAt->isPast()) {
+            Cache::forget($this->inviteCacheKey($token));
+            return null;
+        }
+
+        return $payload;
     }
 
     private function inviteCacheKey(string $token): string
