@@ -17,6 +17,7 @@ use Illuminate\Support\Str;
 use App\Mail\Auth\RegistrationOtpMail;
 use App\Mail\Auth\CustomerPasswordResetMail;
 use App\Mail\Auth\UsernameChangeOtpMail;
+use App\Mail\Auth\ReferralRegistrationAlertMail;
 
 class AuthController extends Controller
 {
@@ -175,6 +176,10 @@ class AuthController extends Controller
         ]);
 
         $this->createPrimaryAddressRecord($customer);
+        $referrer = Customer::query()->where('c_userid', $referrerUserId)->first();
+        if ($referrer instanceof Customer) {
+            $this->notifyReferrerAboutRegistration($referrer, $customer);
+        }
 
         Cache::forget($this->registrationOtpCacheKey($validated['verification_token']));
 
@@ -1126,6 +1131,29 @@ class AuthController extends Controller
     private function sendRegistrationOtpEmail(string $email, string $otp): void
     {
         Mail::mailer('resend')->to($email)->send(new RegistrationOtpMail($otp, $email));
+    }
+
+    private function notifyReferrerAboutRegistration(Customer $referrer, Customer $referral): void
+    {
+        $recipient = trim((string) ($referrer->c_email ?? ''));
+        if ($recipient === '' || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+
+        $frontend = rtrim((string) env('FRONTEND_URL', config('app.url')), '/');
+        $mailRecipient = env('MAIL_TEST_TO') ?: $recipient;
+
+        try {
+            Mail::mailer('resend')->to($mailRecipient)->send(new ReferralRegistrationAlertMail([
+                'referrer_name' => $this->fullName($referrer),
+                'referral_name' => $this->fullName($referral),
+                'referral_username' => (string) ($referral->c_username ?? ''),
+                'registered_at' => now()->toDayDateTimeString(),
+                'login_url' => $frontend . '/login',
+            ]));
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     private function sendUsernameChangeOtpEmail(string $email, string $otp): void

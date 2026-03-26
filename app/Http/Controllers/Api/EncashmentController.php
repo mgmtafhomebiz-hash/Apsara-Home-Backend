@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\Admin\AdminKycSubmittedAlertMail;
+use App\Models\Admin;
 use App\Models\AdminNotification;
 use App\Models\CheckoutHistory;
 use App\Models\Customer;
@@ -10,10 +12,12 @@ use App\Models\CustomerVerificationRequest;
 use App\Models\CustomerWalletLedger;
 use App\Models\EncashmentPayoutMethod;
 use App\Models\EncashmentRequest;
+use App\Support\AdminAccess;
 use Illuminate\Http\Request;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Pusher\Pusher;
 
@@ -628,14 +632,16 @@ class EncashmentController extends Controller
             $customer->save();
         }
 
-        $this->notifyAdminKycSubmitted($customer->fresh(), $verificationRequest);
+        $freshCustomer = $customer->fresh();
+        $this->notifyAdminKycSubmitted($freshCustomer, $verificationRequest);
+        $this->emailAdminsAboutKycSubmission($freshCustomer, $verificationRequest);
 
         return response()->json([
             'message' => 'Verification request submitted. Please wait for admin approval.',
             'status' => 'pending_review',
             'approval_owner' => 'admin',
             'reference_no' => $referenceNo,
-            'verification' => $this->verificationMeta($customer->fresh()),
+            'verification' => $this->verificationMeta($freshCustomer),
         ]);
     }
 
@@ -766,6 +772,53 @@ class EncashmentController extends Controller
                 'customer_id' => (int) $customer->c_userid,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    private function emailAdminsAboutKycSubmission(Customer $customer, CustomerVerificationRequest $verificationRequest): void
+    {
+        $admins = Admin::query()->get()->filter(function (Admin $admin) {
+            $email = trim((string) ($admin->user_email ?? ''));
+            return $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) && AdminAccess::hasPermission($admin, 'members');
+        });
+
+        if ($admins->isEmpty()) {
+            return;
+        }
+
+        $frontend = rtrim((string) env('FRONTEND_URL', config('app.url')), '/');
+        $reviewUrl = $frontend . '/admin/members/kyc';
+        $customerName = trim(implode(' ', array_filter([
+            $verificationRequest->cvr_full_name ?: null,
+            $customer->c_fname ?? null,
+            $customer->c_mname ?? null,
+            $customer->c_lname ?? null,
+        ])));
+        $displayName = $customerName !== '' ? $customerName : ((string) ($customer->c_username ?: 'Affiliate'));
+        $referenceNo = (string) ($verificationRequest->cvr_reference_no ?? '');
+        $submittedAt = optional($verificationRequest->created_at)->toDayDateTimeString() ?: now()->toDayDateTimeString();
+
+        foreach ($admins as $admin) {
+            $recipient = trim((string) $admin->user_email);
+            $mailRecipient = env('MAIL_TEST_TO') ?: $recipient;
+
+            try {
+                Mail::mailer('resend')->to($mailRecipient)->send(new AdminKycSubmittedAlertMail([
+                    'recipient_name' => (string) ($admin->fname ?: $admin->username ?: 'Admin'),
+                    'customer_name' => $displayName,
+                    'customer_email' => (string) ($customer->c_email ?? ''),
+                    'reference_no' => $referenceNo,
+                    'submitted_at' => $submittedAt,
+                    'review_url' => $reviewUrl,
+                ]));
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send admin KYC alert email.', [
+                    'admin_id' => (int) $admin->id,
+                    'customer_id' => (int) $customer->c_userid,
+                    'reference_no' => $referenceNo,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
