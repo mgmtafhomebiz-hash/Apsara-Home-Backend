@@ -708,6 +708,7 @@ class ProductController extends Controller
     {
         $admin = $this->resolveAdmin($request);
         $supplierUser = $this->resolveSupplierUser($request);
+        $scope = strtolower(trim((string) $request->query('scope', 'my')));
         $search = trim((string) $request->query('search', ''));
         $perPage = max(1, min(100, (int) $request->query('per_page', 20)));
 
@@ -718,7 +719,12 @@ class ProductController extends Controller
         if ($supplierUser) {
             $query->where('pal_supplier_user_id', (int) $supplierUser->su_id);
         } elseif ($admin) {
-            $query->where('pal_admin_id', (int) $admin->id);
+            $role = $this->roleFromLevel((int) $admin->user_level_id);
+            $isSuperAdmin = $role === 'super_admin';
+
+            if (!($isSuperAdmin && $scope === 'all')) {
+                $query->where('pal_admin_id', (int) $admin->id);
+            }
         }
 
         if ($search !== '') {

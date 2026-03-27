@@ -21,6 +21,8 @@ class Admin extends Authenticatable
         'user_email',
         'fname',
         'avatar_url',
+        'last_seen_at',
+        'last_active_path',
         'is_banned',
     ];
 
@@ -28,6 +30,7 @@ class Admin extends Authenticatable
 
     protected $casts = [
         'admin_permissions' => 'array',
+        'last_seen_at' => 'datetime',
         'is_banned' => 'boolean',
     ];
 

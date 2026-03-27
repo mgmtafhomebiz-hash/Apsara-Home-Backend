@@ -170,6 +170,8 @@ Route::middleware(['auth:sanctum', 'admin.role:super_admin,accounting,finance_of
 
 Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin'])->group(function () {
     Route::get('/admin/users', [AdminUserController::class, 'index']);
+    Route::get('/admin/users/{id}/activity', [AdminUserController::class, 'activity']);
+    Route::post('/admin/users/presence/heartbeat', [AdminUserController::class, 'heartbeat']);
     Route::post('/admin/users', [AdminUserController::class, 'store']);
     Route::put('/admin/users/{id}', [AdminUserController::class, 'update']);
     Route::delete('/admin/users/{id}', [AdminUserController::class, 'destroy']);

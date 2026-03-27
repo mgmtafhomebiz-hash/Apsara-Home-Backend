@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\Admin\AdminInviteMail;
 use App\Models\Admin;
+use App\Models\ProductActivityLog;
 use App\Models\Supplier;
 use App\Support\AdminAccess;
 use Illuminate\Http\Request;
@@ -33,12 +34,17 @@ class AdminUserController extends Controller
 
         $validated = $request->validate([
             'q' => 'nullable|string|max:120',
+            'role' => 'nullable|string|max:60',
+            'activity_status' => 'nullable|string|in:active,inactive',
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:100',
         ]);
 
         $search = trim((string) ($validated['q'] ?? ''));
+        $roleFilter = strtolower(trim((string) ($validated['role'] ?? '')));
+        $activityStatus = strtolower(trim((string) ($validated['activity_status'] ?? '')));
         $perPage = (int) ($validated['per_page'] ?? 20);
+        $activeCutoff = now()->subMinutes(2);
 
         $rows = Admin::query()
             ->with('supplier')
@@ -52,11 +58,106 @@ class AdminUserController extends Controller
                         ->orWhere('user_email', 'like', "%{$search}%");
                 });
             })
+            ->when($roleFilter !== '', function ($builder) use ($roleFilter) {
+                $roleLevel = match ($roleFilter) {
+                    'super_admin' => 1,
+                    'admin' => 2,
+                    'csr' => 3,
+                    'web_content' => 4,
+                    'accounting' => 5,
+                    'finance_officer' => 6,
+                    'merchant_admin' => 7,
+                    'supplier_admin' => 8,
+                    default => null,
+                };
+
+                if ($roleLevel !== null) {
+                    $builder->where('user_level_id', $roleLevel);
+                }
+            })
+            ->when($activityStatus === 'active', function ($builder) use ($activeCutoff) {
+                $builder->whereNotNull('last_seen_at')->where('last_seen_at', '>=', $activeCutoff);
+            })
+            ->when($activityStatus === 'inactive', function ($builder) use ($activeCutoff) {
+                $builder->where(function ($query) use ($activeCutoff) {
+                    $query->whereNull('last_seen_at')->orWhere('last_seen_at', '<', $activeCutoff);
+                });
+            })
             ->orderByDesc('id')
             ->paginate($perPage);
 
         return response()->json([
             'users' => collect($rows->items())->map(fn (Admin $admin) => $this->transform($admin))->values(),
+            'meta' => [
+                'current_page' => $rows->currentPage(),
+                'last_page' => $rows->lastPage(),
+                'per_page' => $rows->perPage(),
+                'total' => $rows->total(),
+                'from' => $rows->firstItem(),
+                'to' => $rows->lastItem(),
+            ],
+        ]);
+    }
+
+    public function heartbeat(Request $request)
+    {
+        $actor = $this->resolveAdmin($request);
+        if (!$actor) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'path' => 'nullable|string|max:255',
+        ]);
+
+        $actor->forceFill([
+            'last_seen_at' => now(),
+            'last_active_path' => trim((string) ($validated['path'] ?? '')) ?: null,
+        ])->save();
+
+        return response()->json([
+            'message' => 'Presence updated.',
+            'last_seen_at' => optional($actor->last_seen_at)->toIso8601String(),
+            'last_active_path' => $actor->last_active_path,
+        ]);
+    }
+
+    public function activity(Request $request, int $id)
+    {
+        $actor = $this->resolveAdmin($request);
+        if (!$actor) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+        if (!$this->canManageAdminUsers($actor)) {
+            return response()->json(['message' => 'Forbidden: only admin managers can access admin activity.'], 403);
+        }
+
+        $admin = Admin::query()->where('id', $id)->firstOrFail();
+        $this->ensureCanManageTarget($actor, $admin);
+
+        $validated = $request->validate([
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:50',
+        ]);
+
+        $perPage = (int) ($validated['per_page'] ?? 12);
+
+        $rows = ProductActivityLog::query()
+            ->where('pal_admin_id', (int) $admin->id)
+            ->orderByDesc('pal_created_at')
+            ->orderByDesc('pal_id')
+            ->paginate($perPage);
+
+        return response()->json([
+            'user' => $this->transform($admin),
+            'logs' => collect($rows->items())->map(fn (ProductActivityLog $log) => [
+                'id' => (int) $log->pal_id,
+                'action' => (string) $log->pal_action,
+                'status' => (string) $log->pal_status,
+                'productName' => (string) $log->pal_product_name,
+                'productSku' => $log->pal_product_sku ? (string) $log->pal_product_sku : null,
+                'createdAt' => optional($log->pal_created_at)->toIso8601String(),
+            ])->values(),
             'meta' => [
                 'current_page' => $rows->currentPage(),
                 'last_page' => $rows->lastPage(),
@@ -396,6 +497,10 @@ class AdminUserController extends Controller
 
     private function transform(Admin $admin): array
     {
+        $lastSeenAt = $admin->last_seen_at ? Carbon::parse($admin->last_seen_at) : null;
+        $minutesAgo = $lastSeenAt ? max(0, (int) floor($lastSeenAt->diffInMinutes(now(), true))) : null;
+        $isOnline = $lastSeenAt ? $lastSeenAt->greaterThanOrEqualTo(now()->subMinutes(2)) : false;
+
         return [
             'id' => (int) $admin->id,
             'name' => (string) ($admin->fname ?: $admin->username),
@@ -407,6 +512,10 @@ class AdminUserController extends Controller
             'supplier_name' => $admin->supplier?->s_company ?: $admin->supplier?->s_name,
             'admin_permissions' => AdminAccess::permissionsForAdmin($admin),
             'is_banned' => (bool) $admin->is_banned,
+            'is_online' => $isOnline,
+            'last_seen_at' => $lastSeenAt?->toIso8601String(),
+            'minutes_since_active' => $minutesAgo,
+            'last_active_path' => $admin->last_active_path ? (string) $admin->last_active_path : null,
         ];
     }
 
