@@ -316,6 +316,55 @@ class ProductController extends Controller
         ];
     }
 
+    private function createProductActivity(
+        string $action,
+        string $status,
+        ?Admin $admin,
+        ?SupplierUser $supplierUser,
+        ?Product $product = null,
+        ?string $productName = null,
+        ?string $productSku = null
+    ): void {
+        $resolvedProductName = trim((string) ($productName ?? ($product?->pd_name ?? '')));
+        $resolvedProductSku = trim((string) ($productSku ?? ($product?->pd_parent_sku ?? '')));
+
+        try {
+            ProductActivityLog::create([
+                'pal_product_id' => $product ? (int) $product->pd_id : null,
+                'pal_supplier_id' => $this->actorSupplierId($admin, $supplierUser) ?: null,
+                'pal_admin_id' => $admin ? (int) $admin->id : null,
+                'pal_supplier_user_id' => $supplierUser ? (int) $supplierUser->su_id : null,
+                'pal_action' => $action,
+                'pal_status' => $status,
+                'pal_product_name' => $resolvedProductName !== '' ? $resolvedProductName : 'Unknown product',
+                'pal_product_sku' => $resolvedProductSku !== '' ? $resolvedProductSku : null,
+                'pal_actor_name' => $this->actorDisplayName($admin, $supplierUser),
+                'pal_actor_email' => $this->actorEmail($admin, $supplierUser),
+                'pal_actor_role' => $this->actorRoleLabel($admin, $supplierUser),
+                'pal_created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Product activity log write failed', [
+                'action' => $action,
+                'status' => $status,
+                'product_id' => $product?->pd_id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function recordFailedProductActivity(
+        string $action,
+        ?Admin $admin,
+        ?SupplierUser $supplierUser,
+        ?Product $product = null,
+        ?string $productName = null,
+        ?string $productSku = null
+    ): void {
+        $this->createProductActivity($action, 'failed', $admin, $supplierUser, $product, $productName, $productSku);
+    }
+
     private function recordProductActivity(
         string $action,
         Product $product,
@@ -324,20 +373,7 @@ class ProductController extends Controller
         ?string $productName = null,
         ?string $productSku = null
     ): void {
-        ProductActivityLog::create([
-            'pal_product_id' => (int) $product->pd_id,
-            'pal_supplier_id' => $this->actorSupplierId($admin, $supplierUser) ?: null,
-            'pal_admin_id' => $admin ? (int) $admin->id : null,
-            'pal_supplier_user_id' => $supplierUser ? (int) $supplierUser->su_id : null,
-            'pal_action' => $action,
-            'pal_status' => 'success',
-            'pal_product_name' => $productName ?: (string) $product->pd_name,
-            'pal_product_sku' => $productSku ?: ((string) ($product->pd_parent_sku ?? '') ?: null),
-            'pal_actor_name' => $this->actorDisplayName($admin, $supplierUser),
-            'pal_actor_email' => $this->actorEmail($admin, $supplierUser),
-            'pal_actor_role' => $this->actorRoleLabel($admin, $supplierUser),
-            'pal_created_at' => now(),
-        ]);
+        $this->createProductActivity('' !== $action ? $action : 'updated', 'success', $admin, $supplierUser, $product, $productName, $productSku);
     }
 
     private function supplierCanUseCategory(int $supplierId, int $categoryId): bool
@@ -718,6 +754,7 @@ class ProductController extends Controller
         $supplierUser = $this->resolveSupplierUser($request);
         $actorSupplierId = $this->actorSupplierId($admin, $supplierUser);
         if ($admin && $this->roleFromLevel((int) $admin->user_level_id) === 'supplier_admin' && ! $admin->supplier_id) {
+            $this->recordFailedProductActivity('created', $admin, $supplierUser, null, (string) $request->input('pd_name', ''), (string) $request->input('pd_parent_sku', ''));
             return response()->json([
                 'message' => 'Supplier Admin account is not linked to a supplier company.',
             ], 422);
@@ -772,11 +809,13 @@ class ProductController extends Controller
         ]);
 
         if ($validator->fails()) {
+            $this->recordFailedProductActivity('created', $admin, $supplierUser, null, (string) $request->input('pd_name', ''), (string) $request->input('pd_parent_sku', ''));
             return $this->validationErrorResponse($validator);
         }
 
         $categoryId = (int) $request->input('pd_catid', 0);
         if ($actorSupplierId > 0 && ! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
+            $this->recordFailedProductActivity('created', $admin, $supplierUser, null, (string) $request->input('pd_name', ''), (string) $request->input('pd_parent_sku', ''));
             return response()->json([
                 'message' => 'Validation failed.',
                 'errors' => [
@@ -787,6 +826,7 @@ class ProductController extends Controller
 
         $brandType = (int) $request->input('pd_brand_type', 0);
         if ($brandType > 0 && ! ProductBrand::query()->where('pb_id', $brandType)->exists()) {
+            $this->recordFailedProductActivity('created', $admin, $supplierUser, null, (string) $request->input('pd_name', ''), (string) $request->input('pd_parent_sku', ''));
             return response()->json([
                 'message' => 'Validation failed.',
                 'errors' => [
@@ -889,6 +929,14 @@ class ProductController extends Controller
                 'sql'  => method_exists($e, 'getSql') ? $e->getSql() : null,
                 'file' => $e->getFile() . ':' . $e->getLine(),
             ]);
+            try {
+                $this->recordFailedProductActivity('created', $admin, $supplierUser, null, (string) $request->input('pd_name', ''), (string) $request->input('pd_parent_sku', ''));
+            } catch (\Throwable $loggingError) {
+                Log::warning('Product activity log failed after create error', [
+                    'exception' => $loggingError::class,
+                    'message' => $loggingError->getMessage(),
+                ]);
+            }
             return response()->json(['message' => 'Server error: ' . $e->getMessage()], 500);
         }
 
@@ -925,6 +973,7 @@ class ProductController extends Controller
         $this->scopeQueryToActor($productQuery, $admin, $supplierUser);
         $product = $productQuery->first();
         if (! $product) {
+            $this->recordFailedProductActivity('updated', $admin, $supplierUser, null, (string) $request->input('pd_name', "Product #{$id}"), (string) $request->input('pd_parent_sku', ''));
             return response()->json(['message' => 'Product not found.'], 404);
         }
 
@@ -978,12 +1027,14 @@ class ProductController extends Controller
         ]);
 
         if ($validator->fails()) {
+            $this->recordFailedProductActivity('updated', $admin, $supplierUser, $product, (string) ($request->input('pd_name', $product->pd_name ?? '') ?: ($product->pd_name ?? '')), (string) ($request->input('pd_parent_sku', $product->pd_parent_sku ?? '') ?: ($product->pd_parent_sku ?? '')));
             return $this->validationErrorResponse($validator);
         }
 
         if ($request->has('pd_catid') && $actorSupplierId > 0) {
             $categoryId = (int) $request->input('pd_catid', 0);
             if (! $this->supplierCanUseCategory($actorSupplierId, $categoryId)) {
+                $this->recordFailedProductActivity('updated', $admin, $supplierUser, $product, (string) ($request->input('pd_name', $product->pd_name ?? '') ?: ($product->pd_name ?? '')), (string) ($request->input('pd_parent_sku', $product->pd_parent_sku ?? '') ?: ($product->pd_parent_sku ?? '')));
                 return response()->json([
                     'message' => 'Validation failed.',
                     'errors' => [
@@ -996,6 +1047,7 @@ class ProductController extends Controller
         if ($request->exists('pd_brand_type')) {
             $brandType = (int) $request->input('pd_brand_type', 0);
             if ($brandType > 0 && ! ProductBrand::query()->where('pb_id', $brandType)->exists()) {
+                $this->recordFailedProductActivity('updated', $admin, $supplierUser, $product, (string) ($request->input('pd_name', $product->pd_name ?? '') ?: ($product->pd_name ?? '')), (string) ($request->input('pd_parent_sku', $product->pd_parent_sku ?? '') ?: ($product->pd_parent_sku ?? '')));
                 return response()->json([
                     'message' => 'Validation failed.',
                     'errors' => [
@@ -1150,6 +1202,16 @@ class ProductController extends Controller
 
             Log::error('Product update failed | ' . $flatLog);
 
+            try {
+                $this->recordFailedProductActivity('updated', $admin, $supplierUser, $product, (string) ($request->input('pd_name', $product->pd_name ?? '') ?: ($product->pd_name ?? '')), (string) ($request->input('pd_parent_sku', $product->pd_parent_sku ?? '') ?: ($product->pd_parent_sku ?? '')));
+            } catch (\Throwable $loggingError) {
+                Log::warning('Product activity log failed after update error', [
+                    'product_id' => $id,
+                    'exception' => $loggingError::class,
+                    'message' => $loggingError->getMessage(),
+                ]);
+            }
+
             return response()->json([
                 'message' => 'Server error: ' . $e->getMessage(),
             ], 500);
@@ -1182,12 +1244,27 @@ class ProductController extends Controller
         }
         $product = $productQuery->first();
         if (! $product) {
+            $this->recordFailedProductActivity('deleted', $admin, $supplierUser, null, "Product #{$id}");
             return response()->json(['message' => 'Product not found.'], 404);
         }
 
         $deletedProductName = (string) $product->pd_name;
         $deletedProductSku = (string) ($product->pd_parent_sku ?? '');
-        $product->delete();
+        try {
+            $product->delete();
+        } catch (\Throwable $e) {
+            try {
+                $this->recordFailedProductActivity('deleted', $admin, $supplierUser, $product, $deletedProductName, $deletedProductSku);
+            } catch (\Throwable $loggingError) {
+                Log::warning('Product activity log failed after delete error', [
+                    'product_id' => $id,
+                    'exception' => $loggingError::class,
+                    'message' => $loggingError->getMessage(),
+                ]);
+            }
+
+            return response()->json(['message' => 'Failed to delete product.'], 500);
+        }
 
         try {
             $this->recordProductActivity('deleted', $product, $admin, $supplierUser, $deletedProductName, $deletedProductSku);
