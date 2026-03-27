@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductActivityLog;
 use App\Models\ProductPhoto;
 use App\Models\ProductVariant;
 use App\Models\ProductVariantPhoto;
@@ -243,6 +244,100 @@ class ProductController extends Controller
         }
 
         return 0;
+    }
+
+    private function actorDisplayName(?Admin $admin, ?SupplierUser $supplierUser): ?string
+    {
+        if ($supplierUser) {
+            $name = trim((string) ($supplierUser->su_fullname ?? ''));
+            if ($name !== '') {
+                return $name;
+            }
+
+            $username = trim((string) ($supplierUser->su_username ?? ''));
+            return $username !== '' ? $username : null;
+        }
+
+        if ($admin) {
+            $name = trim((string) ($admin->fname ?? ''));
+            if ($name !== '') {
+                return $name;
+            }
+
+            $username = trim((string) ($admin->username ?? ''));
+            return $username !== '' ? $username : null;
+        }
+
+        return null;
+    }
+
+    private function actorEmail(?Admin $admin, ?SupplierUser $supplierUser): ?string
+    {
+        if ($supplierUser) {
+            $email = trim((string) ($supplierUser->su_email ?? ''));
+            return $email !== '' ? $email : null;
+        }
+
+        if ($admin) {
+            $email = trim((string) ($admin->user_email ?? ''));
+            return $email !== '' ? $email : null;
+        }
+
+        return null;
+    }
+
+    private function actorRoleLabel(?Admin $admin, ?SupplierUser $supplierUser): ?string
+    {
+        if ($supplierUser) {
+            return 'supplier_user';
+        }
+
+        if ($admin) {
+            return $this->roleFromLevel((int) $admin->user_level_id);
+        }
+
+        return null;
+    }
+
+    private function mapProductActivityLog(ProductActivityLog $log): array
+    {
+        return [
+            'id' => (int) $log->pal_id,
+            'productId' => $log->pal_product_id ? (int) $log->pal_product_id : null,
+            'supplierId' => $log->pal_supplier_id ? (int) $log->pal_supplier_id : null,
+            'action' => (string) $log->pal_action,
+            'status' => (string) $log->pal_status,
+            'productName' => (string) $log->pal_product_name,
+            'productSku' => $log->pal_product_sku ? (string) $log->pal_product_sku : null,
+            'actorName' => $log->pal_actor_name ? (string) $log->pal_actor_name : null,
+            'actorEmail' => $log->pal_actor_email ? (string) $log->pal_actor_email : null,
+            'actorRole' => $log->pal_actor_role ? (string) $log->pal_actor_role : null,
+            'createdAt' => optional($log->pal_created_at)->toIso8601String(),
+        ];
+    }
+
+    private function recordProductActivity(
+        string $action,
+        Product $product,
+        ?Admin $admin,
+        ?SupplierUser $supplierUser,
+        ?string $productName = null,
+        ?string $productSku = null
+    ): void {
+        ProductActivityLog::create([
+            'pal_product_id' => (int) $product->pd_id,
+            'pal_supplier_id' => $this->actorSupplierId($admin, $supplierUser) ?: null,
+            'pal_admin_id' => $admin ? (int) $admin->id : null,
+            'pal_supplier_user_id' => $supplierUser ? (int) $supplierUser->su_id : null,
+            'pal_action' => $action,
+            'pal_status' => 'success',
+            'pal_product_name' => $productName ?: (string) $product->pd_name,
+            'pal_product_sku' => $productSku ?: ((string) ($product->pd_parent_sku ?? '') ?: null),
+            'pal_actor_name' => $this->actorDisplayName($admin, $supplierUser),
+            'pal_actor_email' => $this->actorEmail($admin, $supplierUser),
+            'pal_actor_role' => $this->actorRoleLabel($admin, $supplierUser),
+            'pal_created_at' => now(),
+        ]);
     }
 
     private function supplierCanUseCategory(int $supplierId, int $categoryId): bool
@@ -573,6 +668,56 @@ class ProductController extends Controller
         }
     }
 
+    public function activityLogs(Request $request): JsonResponse
+    {
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
+        $scope = strtolower(trim((string) $request->query('scope', 'my')));
+        $search = trim((string) $request->query('search', ''));
+        $perPage = max(1, min(100, (int) $request->query('per_page', 20)));
+
+        $query = ProductActivityLog::query()
+            ->orderByDesc('pal_created_at')
+            ->orderByDesc('pal_id');
+
+        if ($supplierUser) {
+            $query->where('pal_supplier_user_id', (int) $supplierUser->su_id);
+        } elseif ($admin) {
+            $role = $this->roleFromLevel((int) $admin->user_level_id);
+            $canViewAll = in_array($role, ['super_admin', 'admin'], true);
+
+            if ($scope !== 'all' || ! $canViewAll) {
+                $query->where('pal_admin_id', (int) $admin->id);
+            }
+        }
+
+        if ($search !== '') {
+            $query->where(function ($inner) use ($search) {
+                $like = '%' . $search . '%';
+                $inner->where('pal_product_name', 'ilike', $like)
+                    ->orWhere('pal_product_sku', 'ilike', $like)
+                    ->orWhere('pal_actor_name', 'ilike', $like)
+                    ->orWhere('pal_actor_email', 'ilike', $like);
+            });
+        }
+
+        $paginator = $query->paginate($perPage);
+
+        return response()->json([
+            'logs' => collect($paginator->items())
+                ->map(fn (ProductActivityLog $log) => $this->mapProductActivityLog($log))
+                ->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $admin = $this->resolveAdmin($request);
@@ -751,6 +896,16 @@ class ProductController extends Controller
                 'file' => $e->getFile() . ':' . $e->getLine(),
             ]);
             return response()->json(['message' => 'Server error: ' . $e->getMessage()], 500);
+        }
+
+        try {
+            $this->recordProductActivity('created', $product, $admin, $supplierUser);
+        } catch (\Throwable $e) {
+            Log::warning('Product activity log failed after create', [
+                'product_id' => $product->pd_id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
         }
 
         return response()->json([
@@ -1006,11 +1161,23 @@ class ProductController extends Controller
             ], 500);
         }
 
+        try {
+            $this->recordProductActivity('updated', $product, $admin, $supplierUser);
+        } catch (\Throwable $e) {
+            Log::warning('Product activity log failed after update', [
+                'product_id' => $product->pd_id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json(['message' => 'Product updated successfully.']);
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        $admin = $this->resolveAdmin($request);
+        $supplierUser = $this->resolveSupplierUser($request);
         $actor = auth('sanctum')->user();
         $productQuery = Product::query()->where('pd_id', $id);
         if ($actor instanceof Admin) {
@@ -1024,7 +1191,19 @@ class ProductController extends Controller
             return response()->json(['message' => 'Product not found.'], 404);
         }
 
+        $deletedProductName = (string) $product->pd_name;
+        $deletedProductSku = (string) ($product->pd_parent_sku ?? '');
         $product->delete();
+
+        try {
+            $this->recordProductActivity('deleted', $product, $admin, $supplierUser, $deletedProductName, $deletedProductSku);
+        } catch (\Throwable $e) {
+            Log::warning('Product activity log failed after delete', [
+                'product_id' => $id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json(['message' => 'Product deleted successfully.']);
     }
